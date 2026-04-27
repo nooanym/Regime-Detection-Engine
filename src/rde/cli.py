@@ -29,9 +29,11 @@ from rde.features.volatility import RollingVolatility
 from rde.features.volume import LogVolume, RollingVolumeZScore
 from rde.inference.smoothing import forward_backward_posteriors
 from rde.inference.viterbi import viterbi_decode
+from rde.inference.online import OnlineDecoder
 from rde.labeling.ranking import HEURISTIC_DISCLAIMER, LabelledState, rank_states
 from rde.models.hmm import FittedModel, train_hmm
 from rde.models.selection import select_n_states
+from rde.signals.regime_signal import RegimeSignalConfig, RegimeSignalGenerator
 from rde.viz.interactive import (
     plot_per_regime_returns as iplot_per_regime_returns,
     plot_price_with_regimes as iplot_price_with_regimes,
@@ -316,6 +318,27 @@ def main() -> None:
     help="Emission distribution: 'gaussian' (default) or 'student_t' (fat-tailed ECM). "
          "Overrides config.model.emission_dist.",
 )
+@click.option(
+    "--signal",
+    "generate_signal",
+    is_flag=True,
+    default=False,
+    help="Generate regime-based trading signals and export signals.parquet.",
+)
+@click.option(
+    "--signal-scoring",
+    "signal_scoring",
+    default="sharpe",
+    type=click.Choice(["sharpe", "return"]),
+    help="Metric used to score states for signal generation (default: sharpe).",
+)
+@click.option(
+    "--signal-ema",
+    "signal_ema_span",
+    default=None,
+    type=int,
+    help="Optional EMA span (bars) applied to the raw signal for smoothing.",
+)
 def run(
     config_path: str,
     n_states_override: int | None,
@@ -326,6 +349,9 @@ def run(
     run_walk_forward: bool,
     wf_window_override: str | None,
     emission_dist_override: str | None,
+    generate_signal: bool,
+    signal_scoring: str,
+    signal_ema_span: int | None,
 ) -> None:
     """Run the full regime detection pipeline for one asset config."""
     # ── 1. Config ──────────────────────────────────────────────────────────
@@ -469,6 +495,29 @@ def run(
         labels=label_list,
     )
 
+    # ── 6b. Online filtering + signal generation (optional) ───────────────
+    signal_df: pd.DataFrame | None = None
+    if generate_signal:
+        click.echo(
+            f"        Generating signal  scoring={signal_scoring}"
+            + (f"  ema_span={signal_ema_span}" if signal_ema_span else "")
+            + " ..."
+        )
+        decoder = OnlineDecoder(fitted)
+        filtered_posteriors = decoder.batch_filter(X)
+
+        sig_cfg = RegimeSignalConfig(
+            scoring=signal_scoring,
+            ema_span=signal_ema_span,
+        )
+        generator = RegimeSignalGenerator(regime_stats, config=sig_cfg)
+        signal_df = generator.generate_dataframe(
+            posteriors=filtered_posteriors,
+            index=df_features.index,
+            viterbi_states=states,
+            labels=label_list,
+        )
+
     # ── 8. Plots ───────────────────────────────────────────────────────────
     output_dir = Path(cfg.run.output_dir.format(symbol=symbol))
     plots_dir = output_dir / "plots"
@@ -530,9 +579,14 @@ def run(
     analytics_path = output_dir / "regime_analytics.parquet"
     regime_stats_df.to_parquet(analytics_path)
 
-    click.echo(f"        regimes.parquet       → {regimes_path}")
+    click.echo(f"        regimes.parquet          → {regimes_path}")
     click.echo(f"        regime_analytics.parquet → {analytics_path}")
-    click.echo(f"        diagnostics.txt       → {diag_path}")
+    click.echo(f"        diagnostics.txt          → {diag_path}")
+
+    if signal_df is not None:
+        signal_path = output_dir / "signals.parquet"
+        signal_df.to_parquet(signal_path)
+        click.echo(f"        signals.parquet          → {signal_path}")
 
     if wf_result is not None:
         wf_path = output_dir / "walk_forward_regimes.parquet"
