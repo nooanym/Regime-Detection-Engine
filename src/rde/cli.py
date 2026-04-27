@@ -339,6 +339,26 @@ def main() -> None:
     type=int,
     help="Optional EMA span (bars) applied to the raw signal for smoothing.",
 )
+@click.option(
+    "--backtest",
+    "run_backtest_flag",
+    is_flag=True,
+    default=False,
+    help="Run vectorized backtest on the regime signal. Requires --signal.",
+)
+@click.option(
+    "--bt-mode",
+    default="proportional",
+    type=click.Choice(["proportional", "threshold", "long_only"]),
+    help="Position sizing mode for backtest (default: proportional).",
+)
+@click.option(
+    "--bt-cost-bps",
+    "bt_cost_bps",
+    default=1.0,
+    type=float,
+    help="Transaction cost in basis points per unit position change (default: 1.0).",
+)
 def run(
     config_path: str,
     n_states_override: int | None,
@@ -352,6 +372,9 @@ def run(
     generate_signal: bool,
     signal_scoring: str,
     signal_ema_span: int | None,
+    run_backtest_flag: bool,
+    bt_mode: str,
+    bt_cost_bps: float,
 ) -> None:
     """Run the full regime detection pipeline for one asset config."""
     # ── 1. Config ──────────────────────────────────────────────────────────
@@ -592,6 +615,33 @@ def run(
         wf_path = output_dir / "walk_forward_regimes.parquet"
         wf_result.to_parquet(wf_path)
         click.echo(f"        walk_forward_regimes  → {wf_path}")
+
+    if run_backtest_flag:
+        if signal_df is None:
+            raise click.UsageError("--backtest requires --signal.")
+        from rde.backtest.engine import BacktestConfig as BtConfig, run_backtest as _run_bt
+        bt_cfg = BtConfig(mode=bt_mode, transaction_cost_bps=bt_cost_bps)
+        return_col = fitted.feature_names[0]
+        bt_result = _run_bt(
+            returns=df_features[return_col],
+            signal=signal_df["signal"],
+            config=bt_cfg,
+        )
+        bt_path = output_dir / "backtest.parquet"
+        # Save equity_curve, positions, net_returns as a DataFrame
+        bt_df = pd.DataFrame({
+            "equity_curve": bt_result.equity_curve,
+            "position": bt_result.positions,
+            "net_return": bt_result.net_returns,
+        })
+        bt_df.to_parquet(bt_path)
+        click.echo(f"        backtest.parquet          → {bt_path}")
+        click.echo(f"\n  BACKTEST ({bt_cfg.mode} | {bt_cfg.transaction_cost_bps} bps):")
+        for k, v in bt_result.metrics.items():
+            if isinstance(v, float):
+                click.echo(f"    {k:<28} {v:>+.4f}")
+            else:
+                click.echo(f"    {k:<28} {v}")
 
     # ── Summary ────────────────────────────────────────────────────────────
     click.echo(f"\n{'═'*60}")
