@@ -1,0 +1,35 @@
+asset:
+  symbol: ETH-USD
+  period: 730d
+  interval: 1h
+
+features:
+  - name: LogReturns
+  - name: RollingVolatility
+    params:
+      window: 24
+  - name: SmoothedReturns
+    params:
+      window: 12
+
+model:
+  candidate_states: [2, 3, 4, 5, 6]
+  covariance_type: full
+  n_restarts: 10
+  n_iter: 1000
+  init_strategy: kmeans
+  seed_base: 42
+
+selection:
+  criterion: bic
+
+run:
+  output_dir: results/{symbol}/
+
+evaluation:
+  run_stability: false
+  stability_n_runs: 3
+  run_walk_forward: false
+  walk_forward_train_window: 180d
+  walk_forward_recalibration: monthly
+  walk_forward_n_restarts: 3
