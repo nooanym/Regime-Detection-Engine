@@ -4,6 +4,7 @@ from rde.features.base import FeatureTransformer
 from rde.features.pipeline import FeaturePipeline
 from rde.features.returns import LogReturns, SmoothedReturns
 from rde.features.volatility import RollingVolatility
+from rde.features.volume import LogVolume, RollingVolumeZScore
 
 __all__ = [
     "FeatureTransformer",
@@ -11,4 +12,6 @@ __all__ = [
     "LogReturns",
     "SmoothedReturns",
     "RollingVolatility",
+    "LogVolume",
+    "RollingVolumeZScore",
 ]

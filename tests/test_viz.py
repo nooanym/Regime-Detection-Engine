@@ -313,7 +313,7 @@ class TestAssetConfigs:
         assert cfg.asset.symbol == "ETH-USD"
         assert cfg.asset.period == "730d"
         assert cfg.asset.interval == "1h"
-        assert cfg.model.candidate_states == [2, 3, 4, 5, 6]
+        assert cfg.model.candidate_states == [2, 3, 4, 5, 6, 7, 8]
 
     def test_spy_config_loads(self):
         from rde.config.loader import load_config

@@ -21,6 +21,7 @@ from rde.evaluation.walk_forward import WalkForwardHarness
 from rde.features.pipeline import FeaturePipeline
 from rde.features.returns import LogReturns, SmoothedReturns
 from rde.features.volatility import RollingVolatility
+from rde.features.volume import LogVolume, RollingVolumeZScore
 from rde.inference.smoothing import forward_backward_posteriors
 from rde.inference.viterbi import viterbi_decode
 from rde.labeling.ranking import HEURISTIC_DISCLAIMER, LabelledState, rank_states
@@ -51,6 +52,8 @@ _FEATURE_REGISTRY: dict = {
     "LogReturns": lambda params: LogReturns(),
     "RollingVolatility": lambda params: RollingVolatility(**params),
     "SmoothedReturns": lambda params: SmoothedReturns(**params),
+    "LogVolume": lambda params: LogVolume(),
+    "RollingVolumeZScore": lambda params: RollingVolumeZScore(**params),
 }
 
 
@@ -82,6 +85,9 @@ def _write_diagnostics(
     lines: list[str] = []
     sep = "=" * 70
 
+    from rde.models.student_t_hmm import StudentTHMM as _StudentTHMM
+    emission_label = "student_t" if isinstance(fitted.hmm, _StudentTHMM) else "gaussian"
+
     lines += [
         sep,
         "REGIME DETECTION ENGINE — DIAGNOSTICS",
@@ -90,6 +96,7 @@ def _write_diagnostics(
         f"Observations:  {len(df_features)}",
         f"Features:      {fitted.feature_names}",
         f"n_states:      {fitted.n_states}",
+        f"Emission:      {emission_label}",
         f"Seed (winner): {fitted.seed}",
         f"Log-lik:       {fitted.log_likelihood:.4f}",
         f"AIC:           {fitted.aic:.4f}",
@@ -111,12 +118,15 @@ def _write_diagnostics(
     lines.append("")
 
     lines.append("STATE MEANS  (in scaled feature space)")
+    from rde.models.student_t_hmm import StudentTHMM as _StudentTHMMInner
+    is_student_t = isinstance(fitted.hmm, _StudentTHMMInner)
     for i in range(fitted.n_states):
         parts = "  ".join(
             f"{name}={val:.4f}"
             for name, val in zip(fitted.feature_names, fitted.hmm.means_[i])
         )
-        lines.append(f"  State {i}: {parts}")
+        dof_str = f"  dof={fitted.hmm.dofs_[i]:.2f}" if is_student_t else ""
+        lines.append(f"  State {i}: {parts}{dof_str}")
     lines.append("")
 
     lines.append("TRANSITION ENTROPY (nats per state)")
@@ -273,6 +283,14 @@ def main() -> None:
     type=str,
     help="Training window for walk-forward, e.g. '180d' (overrides config).",
 )
+@click.option(
+    "--emission-dist",
+    "emission_dist_override",
+    default=None,
+    type=click.Choice(["gaussian", "student_t"]),
+    help="Emission distribution: 'gaussian' (default) or 'student_t' (fat-tailed ECM). "
+         "Overrides config.model.emission_dist.",
+)
 def run(
     config_path: str,
     n_states_override: int | None,
@@ -282,6 +300,7 @@ def run(
     stability_runs_override: int | None,
     run_walk_forward: bool,
     wf_window_override: str | None,
+    emission_dist_override: str | None,
 ) -> None:
     """Run the full regime detection pipeline for one asset config."""
     # ── 1. Config ──────────────────────────────────────────────────────────
@@ -293,6 +312,7 @@ def run(
     do_walk_forward = run_walk_forward or cfg.evaluation.run_walk_forward
     stability_n_runs = stability_runs_override or cfg.evaluation.stability_n_runs
     wf_window = wf_window_override or cfg.evaluation.walk_forward_train_window
+    emission_dist = emission_dist_override or cfg.model.emission_dist
 
     click.echo(f"\n{'═'*60}")
     click.echo(f"  Regime Detection Engine  ·  {symbol}")
@@ -326,6 +346,7 @@ def run(
         init_strategy=cfg.model.init_strategy,
         seed_base=cfg.model.seed_base,
         feature_names=feature_cols,
+        emission_dist=emission_dist,
     )
 
     # ── 4. Train / select ──────────────────────────────────────────────────

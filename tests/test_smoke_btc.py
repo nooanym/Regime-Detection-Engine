@@ -305,7 +305,7 @@ def test_load_btc_yaml(tmp_path):
     cfg = load_config(dst)
     assert cfg.asset.symbol == "BTC-USD"
     assert cfg.asset.period == "730d"
-    assert cfg.model.candidate_states == [2, 3, 4, 5, 6]
+    assert cfg.model.candidate_states == [2, 3, 4, 5, 6, 7, 8]
     assert cfg.selection.criterion == "bic"
 
 

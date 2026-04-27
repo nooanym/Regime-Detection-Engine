@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 _VALID_CRITERIA = frozenset({"aic", "bic"})
 _VALID_COV_TYPES = frozenset({"full", "diag", "tied", "spherical"})
+_VALID_EMISSION_DISTS = frozenset({"gaussian", "student_t"})
 _MAX_HOURLY_DAYS = 730
 
 
@@ -91,6 +92,12 @@ def load_config(path: Path | str) -> Config:
             f"covariance_type must be one of {sorted(_VALID_COV_TYPES)}, got {cov_type!r}"
         )
 
+    emission_dist = str(model_raw.get("emission_dist", "gaussian"))
+    if emission_dist not in _VALID_EMISSION_DISTS:
+        raise ValueError(
+            f"emission_dist must be one of {sorted(_VALID_EMISSION_DISTS)}, got {emission_dist!r}"
+        )
+
     model = ModelConfig(
         candidate_states=candidate_states,
         covariance_type=cov_type,
@@ -98,6 +105,7 @@ def load_config(path: Path | str) -> Config:
         n_iter=int(model_raw.get("n_iter", 1000)),
         init_strategy=str(model_raw.get("init_strategy", "kmeans")),
         seed_base=int(model_raw.get("seed_base", 42)),
+        emission_dist=emission_dist,
     )
 
     # Selection

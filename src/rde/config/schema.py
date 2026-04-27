@@ -30,6 +30,7 @@ class ModelConfig:
     n_iter: int = 1000
     init_strategy: str = "kmeans"
     seed_base: int = 42
+    emission_dist: str = "gaussian"
 
 
 @dataclass

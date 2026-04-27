@@ -46,7 +46,8 @@ def select_n_states(
         raise ValueError(f"criterion must be 'aic' or 'bic', got {criterion!r}")
 
     _, n_features = X.shape
-    covariance_type = train_kwargs.get("covariance_type", "full")
+    emission_dist = train_kwargs.get("emission_dist", "gaussian")
+    covariance_type = "full" if emission_dist == "student_t" else train_kwargs.get("covariance_type", "full")
 
     rows = []
     models: dict[int, FittedModel] = {}
@@ -55,7 +56,7 @@ def select_n_states(
         logger.info("Evaluating n_states=%d ...", n)
         fitted = train_hmm(X, n, **train_kwargs)
         models[n] = fitted
-        n_params = _compute_n_params(n, n_features, covariance_type)
+        n_params = _compute_n_params(n, n_features, covariance_type, emission_dist)
         converged = sum(s > -np.inf for s in fitted.all_restart_scores)
         rows.append(
             {

@@ -1,4 +1,4 @@
-"""GaussianHMM training with multi-restart Baum-Welch and AIC/BIC scoring."""
+"""GaussianHMM (and StudentTHMM) training with multi-restart Baum-Welch and AIC/BIC scoring."""
 
 import logging
 import warnings
@@ -9,6 +9,8 @@ import pandas as pd
 from hmmlearn.hmm import GaussianHMM
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.preprocessing import StandardScaler
+
+from rde.models.student_t_hmm import StudentTHMM
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +53,13 @@ class FittedModel:
     all_restart_scores: list[float] = field(default_factory=list)
 
 
-def _compute_n_params(n_states: int, n_features: int, covariance_type: str) -> int:
-    """Compute the number of free parameters in a GaussianHMM.
+def _compute_n_params(
+    n_states: int,
+    n_features: int,
+    covariance_type: str,
+    emission_dist: str = "gaussian",
+) -> int:
+    """Compute the number of free parameters in a Gaussian or Student-t HMM.
 
     Parameters
     ----------
@@ -62,6 +69,8 @@ def _compute_n_params(n_states: int, n_features: int, covariance_type: str) -> i
         Observation dimensionality.
     covariance_type : str
         One of "full", "diag", "tied", "spherical".
+    emission_dist : str
+        "gaussian" or "student_t". Student-t adds one ν_k per state.
 
     Returns
     -------
@@ -73,6 +82,7 @@ def _compute_n_params(n_states: int, n_features: int, covariance_type: str) -> i
     Transition matrix contributes n_states*(n_states-1) free parameters
     (each row sums to 1). Initial distribution contributes n_states-1.
     Means contribute n_states*n_features. Covariance count depends on type.
+    Student-t adds n_states extra parameters (one ν_k per state).
 
     """
     trans_params = n_states * (n_states - 1)
@@ -90,7 +100,8 @@ def _compute_n_params(n_states: int, n_features: int, covariance_type: str) -> i
     else:
         raise ValueError(f"Unknown covariance_type: {covariance_type!r}")
 
-    return trans_params + init_params + mean_params + cov_params
+    dof_params = n_states if emission_dist == "student_t" else 0
+    return trans_params + init_params + mean_params + cov_params + dof_params
 
 
 def train_hmm(
@@ -103,8 +114,9 @@ def train_hmm(
     init_strategy: str = "kmeans",
     seed_base: int = 42,
     feature_names: list[str] | None = None,
+    emission_dist: str = "gaussian",
 ) -> FittedModel:
-    """Fit a GaussianHMM with multiple random restarts; return the best by log-likelihood.
+    """Fit a GaussianHMM or StudentTHMM with multiple restarts; return the best by log-likelihood.
 
     Parameters
     ----------
@@ -113,17 +125,20 @@ def train_hmm(
     n_states : int
         Number of hidden states.
     n_restarts : int
-        Number of Baum-Welch restarts. Must be ≥ 1.
+        Number of Baum-Welch / ECM restarts. Must be ≥ 1.
     covariance_type : str
-        One of "full", "diag", "tied", "spherical".
+        One of "full", "diag", "tied", "spherical". Student-t always uses "full".
     n_iter : int
-        Maximum EM iterations per restart.
+        Maximum EM/ECM iterations per restart.
     init_strategy : str
         Initialization strategy label (informational; hmmlearn uses k-means by default).
     seed_base : int
         Base random seed; restart i uses seed_base + i.
     feature_names : list[str] | None
         Names of the feature columns, used for diagnostics.
+    emission_dist : str
+        "gaussian" (default) or "student_t". Student-t uses the ECM algorithm
+        with per-state degrees-of-freedom parameters to model fat-tailed returns.
 
     Returns
     -------
@@ -132,10 +147,17 @@ def train_hmm(
 
     Raises
     ------
+    ValueError
+        If emission_dist is not "gaussian" or "student_t".
     RuntimeError
         If all restarts fail to produce a valid model.
 
     """
+    if emission_dist not in ("gaussian", "student_t"):
+        raise ValueError(
+            f"emission_dist must be 'gaussian' or 'student_t', got {emission_dist!r}"
+        )
+
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
     T, n_features = X_scaled.shape
@@ -143,8 +165,10 @@ def train_hmm(
     if feature_names is None:
         feature_names = [f"feature_{i}" for i in range(n_features)]
 
+    model_name = "StudentTHMM" if emission_dist == "student_t" else "GaussianHMM"
     logger.info(
-        "Training GaussianHMM: n_states=%d, n_restarts=%d, covariance_type=%s, seed_base=%d",
+        "Training %s: n_states=%d, n_restarts=%d, covariance_type=%s, seed_base=%d",
+        model_name,
         n_states,
         n_restarts,
         covariance_type,
@@ -159,12 +183,19 @@ def train_hmm(
 
     for i in range(n_restarts):
         seed = seed_base + i
-        model = GaussianHMM(
-            n_components=n_states,
-            covariance_type=covariance_type,
-            n_iter=n_iter,
-            random_state=seed,
-        )
+        if emission_dist == "student_t":
+            model: GaussianHMM = StudentTHMM(
+                n_components=n_states,
+                n_iter=n_iter,
+                random_state=seed,
+            )
+        else:
+            model = GaussianHMM(
+                n_components=n_states,
+                covariance_type=covariance_type,
+                n_iter=n_iter,
+                random_state=seed,
+            )
         with warnings.catch_warnings(record=True) as caught_warnings:
             warnings.simplefilter("always")
             try:
@@ -208,7 +239,8 @@ def train_hmm(
         n_restarts,
     )
 
-    n_params = _compute_n_params(n_states, n_features, covariance_type)
+    eff_cov_type = "full" if emission_dist == "student_t" else covariance_type
+    n_params = _compute_n_params(n_states, n_features, eff_cov_type, emission_dist)
     aic = 2.0 * n_params - 2.0 * best_score
     bic = n_params * np.log(T) - 2.0 * best_score
 
