@@ -15,6 +15,11 @@ import matplotlib.pyplot as plt
 from rde.config.loader import load_config
 from rde.data.yfinance_source import YFinanceSource
 from rde.evaluation.persistence import empirical_dwell_times, expected_dwell_times
+from rde.evaluation.regime_analytics import (
+    compute_regime_stats,
+    regime_stats_to_dataframe,
+    regime_transition_table,
+)
 from rde.evaluation.stability import stability_across_restarts
 from rde.evaluation.transition import stationary_distribution, transition_entropy
 from rde.evaluation.walk_forward import WalkForwardHarness
@@ -81,6 +86,8 @@ def _write_diagnostics(
     stability_result: dict | None = None,
     wf_result: pd.DataFrame | None = None,
     wf_cfg: object | None = None,
+    regime_stats_df: pd.DataFrame | None = None,
+    transition_table: pd.DataFrame | None = None,
 ) -> None:
     lines: list[str] = []
     sep = "=" * 70
@@ -213,6 +220,24 @@ def _write_diagnostics(
             p = 100.0 * c / n_oos if n_oos > 0 else 0.0
             lbl = label_list[s_idx] if s_idx < len(label_list) else f"State {s_idx}"
             lines.append(f"    State {s_idx} {lbl!r:<28s}  {c:6d} bars  ({p:.1f}%)")
+        lines.append("")
+
+    # ── Regime analytics section ──────────────────────────────────────────────
+    if regime_stats_df is not None:
+        lines.append("REGIME PERFORMANCE ANALYTICS  (annualised, hourly bars @ 8760 h/yr)")
+        lines.append(
+            "  NOTE: In-sample statistics only. Past regime behaviour does not guarantee "
+            "future returns. Log returns used throughout."
+        )
+        lines.append(regime_stats_df.to_string())
+        lines.append("")
+
+    if transition_table is not None:
+        lines.append("FORWARD TRANSITION PROBABILITIES  (horizons: 1h, 6h, 1d, 3d, 1w)")
+        lines.append(
+            "  P(to_state | from_state, h bars ahead) = (A^h)[from, to]"
+        )
+        lines.append(transition_table.to_string(float_format=lambda x: f"{x:.3f}"))
         lines.append("")
 
     lines.append(sep)
@@ -427,10 +452,22 @@ def run(
         pct   = 100.0 * n_oos / len(wf_result)
         click.echo(f"        OOS bars labelled: {n_oos} / {len(wf_result)} ({pct:.1f}%)")
 
-    # ── 7. Labels ──────────────────────────────────────────────────────────
+    # ── 7. Labels + regime analytics ──────────────────────────────────────
     click.echo("  [6/8] Labelling states ...")
     labelled_states = rank_states(fitted)
     label_list = [ls.label for ls in sorted(labelled_states, key=lambda x: x.index)]
+
+    return_col = fitted.feature_names[0]  # log_return is always first
+    regime_stats = compute_regime_stats(
+        returns=df_features[return_col].values,
+        states=states,
+        labels=label_list,
+    )
+    regime_stats_df = regime_stats_to_dataframe(regime_stats)
+    transition_tbl = regime_transition_table(
+        fitted.hmm.transmat_,
+        labels=label_list,
+    )
 
     # ── 8. Plots ───────────────────────────────────────────────────────────
     output_dir = Path(cfg.run.output_dir.format(symbol=symbol))
@@ -475,6 +512,8 @@ def run(
         stability_result=stability_result,
         wf_result=wf_result,
         wf_cfg=cfg.evaluation,
+        regime_stats_df=regime_stats_df,
+        transition_table=transition_tbl,
     )
 
     # ── 10. Regimes parquet ────────────────────────────────────────────────
@@ -487,7 +526,12 @@ def run(
 
     regimes_path = output_dir / "regimes.parquet"
     df_regimes.to_parquet(regimes_path)
+
+    analytics_path = output_dir / "regime_analytics.parquet"
+    regime_stats_df.to_parquet(analytics_path)
+
     click.echo(f"        regimes.parquet       → {regimes_path}")
+    click.echo(f"        regime_analytics.parquet → {analytics_path}")
     click.echo(f"        diagnostics.txt       → {diag_path}")
 
     if wf_result is not None:
@@ -514,8 +558,16 @@ def run(
         click.echo(f"  Walk-forward: {n_oos} OOS bars labelled")
     click.echo(f"\n  {HEURISTIC_DISCLAIMER}")
     click.echo("")
-    for ls in sorted(labelled_states, key=lambda x: x.index):
-        count = int((states == ls.index).sum())
-        pct = 100.0 * count / len(states)
-        click.echo(f"    State {ls.index}: {ls.label!r:<28s}  {count:6d} bars  ({pct:.1f}%)")
+    click.echo(
+        f"  {'State':<8} {'Label':<28} {'Bars':>6}  {'Wt%':>5}  "
+        f"{'RetAnn%':>8}  {'VolAnn%':>8}  {'Sharpe':>7}  {'MaxDD%':>7}"
+    )
+    click.echo("  " + "-" * 82)
+    for rs in regime_stats:
+        sharpe_str = f"{rs.sharpe_ann:>7.2f}" if not np.isnan(rs.sharpe_ann) else "    N/A"
+        click.echo(
+            f"  {rs.state:<8} {rs.label:<28} {rs.count:>6d}  {100*rs.weight:>5.1f}%"
+            f"  {100*rs.mean_return_ann:>+8.2f}  {100*rs.vol_ann:>8.2f}"
+            f"  {sharpe_str}  {100*rs.max_drawdown:>7.2f}"
+        )
     click.echo(f"{'═'*60}\n")
