@@ -50,6 +50,17 @@ from rde.analysis.risk_metrics import (
     compute_regime_risk_weighted,
     regime_risk_divergence,
 )
+from rde.analysis.tail_risk import (
+    GPDParams,
+    RegimeTailResult,
+    TailConfig,
+    fit_gpd,
+    fit_regime_tails,
+    gpd_es,
+    gpd_var,
+    stress_test_scenarios,
+    tail_risk_decomposition,
+)
 from rde.analysis.transition_prediction import (
     RegimeTransitionPredictor,
     TransitionPredictorConfig,
@@ -157,6 +168,16 @@ __all__ = [
     "compute_regime_risk",
     "compute_regime_risk_weighted",
     "regime_risk_divergence",
+    # tail risk / EVT
+    "TailConfig",
+    "GPDParams",
+    "RegimeTailResult",
+    "fit_gpd",
+    "gpd_var",
+    "gpd_es",
+    "fit_regime_tails",
+    "tail_risk_decomposition",
+    "stress_test_scenarios",
     # transition prediction
     "TransitionPredictorConfig",
     "RegimeTransitionPredictor",
