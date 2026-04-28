@@ -22,6 +22,16 @@ from rde.analysis.regime_var import (
     fit_regime_var,
     granger_causality_table,
 )
+from rde.analysis.drawdown_control import (
+    DrawdownControlConfig,
+    RegimePositionLimitConfig,
+    apply_drawdown_control,
+    apply_regime_position_limits,
+    drawdown_scale_factor,
+    regime_drawdown_budget,
+    regime_position_limits,
+    running_drawdown,
+)
 from rde.analysis.information_geometry import (
     DistinguishabilityResult,
     bhattacharyya_coefficient,
@@ -61,6 +71,15 @@ __all__ = [
     "fit_regime_var",
     "compute_irf",
     "granger_causality_table",
+    # drawdown control
+    "DrawdownControlConfig",
+    "RegimePositionLimitConfig",
+    "running_drawdown",
+    "drawdown_scale_factor",
+    "apply_drawdown_control",
+    "regime_position_limits",
+    "apply_regime_position_limits",
+    "regime_drawdown_budget",
     # information geometry
     "DistinguishabilityResult",
     "kl_divergence_gaussians",
