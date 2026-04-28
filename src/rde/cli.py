@@ -32,6 +32,7 @@ from rde.inference.viterbi import viterbi_decode
 from rde.inference.online import OnlineDecoder
 from rde.labeling.ranking import HEURISTIC_DISCLAIMER, LabelledState, rank_states
 from rde.models.hmm import FittedModel, train_hmm
+from rde.models.persistence import load_model, save_model
 from rde.models.selection import select_n_states
 from rde.signals.regime_signal import RegimeSignalConfig, RegimeSignalGenerator
 from rde.viz.interactive import (
@@ -359,6 +360,35 @@ def main() -> None:
     type=float,
     help="Transaction cost in basis points per unit position change (default: 1.0).",
 )
+@click.option(
+    "--save-model",
+    "save_model_path",
+    default=None,
+    type=click.Path(),
+    help="Save the fitted FittedModel to this path after training (e.g. results/btc.pkl).",
+)
+@click.option(
+    "--load-model",
+    "load_model_path",
+    default=None,
+    type=click.Path(exists=True),
+    help="Load a previously saved FittedModel and skip training entirely.",
+)
+@click.option(
+    "--wf-backtest",
+    "run_wf_backtest",
+    is_flag=True,
+    default=False,
+    help="Run a walk-forward OOS backtest with causal per-fold signals. "
+         "Saves wf_backtest.parquet to the output directory.",
+)
+@click.option(
+    "--wf-bt-restarts",
+    "wf_bt_restarts",
+    default=3,
+    type=int,
+    help="HMM restarts per walk-forward fold (default: 3, lower than full run for speed).",
+)
 def run(
     config_path: str,
     n_states_override: int | None,
@@ -375,6 +405,10 @@ def run(
     run_backtest_flag: bool,
     bt_mode: str,
     bt_cost_bps: float,
+    save_model_path: str | None,
+    load_model_path: str | None,
+    run_wf_backtest: bool,
+    wf_bt_restarts: int,
 ) -> None:
     """Run the full regime detection pipeline for one asset config."""
     # ── 1. Config ──────────────────────────────────────────────────────────
@@ -423,9 +457,16 @@ def run(
         emission_dist=emission_dist,
     )
 
-    # ── 4. Train / select ──────────────────────────────────────────────────
+    # ── 4. Train / select / load ───────────────────────────────────────────
     scores_df: pd.DataFrame | None = None
-    if n_states_override is not None:
+    if load_model_path is not None:
+        click.echo(f"  [3/8] Loading pre-fitted model ← {load_model_path} ...")
+        fitted = load_model(load_model_path)
+        click.echo(
+            f"        n_states={fitted.n_states}  seed={fitted.seed}  "
+            f"log-lik={fitted.log_likelihood:.2f}"
+        )
+    elif n_states_override is not None:
         click.echo(f"  [3/8] Training HMM  n_states={n_states_override} (fixed) ...")
         fitted = train_hmm(X, n_states_override, **train_kwargs)
     else:
@@ -445,6 +486,10 @@ def run(
         f"        log-lik={fitted.log_likelihood:.2f}  "
         f"AIC={fitted.aic:.2f}  BIC={fitted.bic:.2f}  seed={fitted.seed}"
     )
+
+    if save_model_path is not None:
+        save_model(fitted, save_model_path)
+        click.echo(f"        Model saved → {save_model_path}")
 
     # ── 5. Inference ───────────────────────────────────────────────────────
     click.echo("  [4/8] Decoding regimes (Viterbi + forward-backward) ...")
@@ -628,7 +673,6 @@ def run(
             config=bt_cfg,
         )
         bt_path = output_dir / "backtest.parquet"
-        # Save equity_curve, positions, net_returns as a DataFrame
         bt_df = pd.DataFrame({
             "equity_curve": bt_result.equity_curve,
             "position": bt_result.positions,
@@ -638,6 +682,59 @@ def run(
         click.echo(f"        backtest.parquet          → {bt_path}")
         click.echo(f"\n  BACKTEST ({bt_cfg.mode} | {bt_cfg.transaction_cost_bps} bps):")
         for k, v in bt_result.metrics.items():
+            if isinstance(v, float):
+                click.echo(f"    {k:<28} {v:>+.4f}")
+            else:
+                click.echo(f"    {k:<28} {v}")
+
+    if run_wf_backtest:
+        from rde.backtest.walk_forward_backtest import (
+            WalkForwardBacktestConfig as WFBTConfig,
+            walk_forward_backtest as _wf_bt,
+        )
+        sig_cfg = RegimeSignalConfig(
+            scoring=signal_scoring,
+            ema_span=signal_ema_span,
+        )
+        bt_cfg = BtConfig(mode=bt_mode, transaction_cost_bps=bt_cost_bps)
+        wf_bt_cfg = WFBTConfig(
+            train_window=wf_window,
+            n_restarts=wf_bt_restarts,
+            signal_config=sig_cfg,
+            backtest_config=bt_cfg,
+            return_col=fitted.feature_names[0],
+        )
+        click.echo(
+            f"\n  Walk-forward OOS backtest  "
+            f"(window={wf_window}  restarts={wf_bt_restarts}  "
+            f"scoring={signal_scoring}  mode={bt_mode}) ..."
+        )
+        wf_bt_result = _wf_bt(
+            df_features=df_features,
+            n_states=fitted.n_states,
+            feature_cols=feature_cols,
+            config=wf_bt_cfg,
+            covariance_type=cfg.model.covariance_type,
+            n_iter=cfg.model.n_iter,
+            seed_base=cfg.model.seed_base,
+            emission_dist=emission_dist,
+        )
+        wf_bt_path = output_dir / "wf_backtest.parquet"
+        wf_bt_df = pd.DataFrame({
+            "equity_curve": wf_bt_result.backtest.equity_curve,
+            "position": wf_bt_result.backtest.positions,
+            "net_return": wf_bt_result.backtest.net_returns,
+            "signal": wf_bt_result.oos_signal,
+        })
+        wf_bt_df.to_parquet(wf_bt_path)
+        wf_bt_result.fold_summary.to_parquet(output_dir / "wf_fold_summary.parquet")
+        click.echo(f"        wf_backtest.parquet       → {wf_bt_path}")
+        click.echo(f"        wf_fold_summary.parquet   → {output_dir / 'wf_fold_summary.parquet'}")
+        click.echo(
+            f"\n  WALK-FORWARD OOS BACKTEST  "
+            f"({wf_bt_result.n_folds} folds | {len(wf_bt_result.oos_returns)} OOS bars):"
+        )
+        for k, v in wf_bt_result.backtest.metrics.items():
             if isinstance(v, float):
                 click.echo(f"    {k:<28} {v:>+.4f}")
             else:

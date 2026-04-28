@@ -106,6 +106,15 @@ def _load_diagnostics(asset: str) -> str | None:
     return path.read_text()
 
 
+@st.cache_data(show_spinner=False)
+def _load_wf_backtest(asset: str) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
+    bt_path = RESULTS_DIR / asset / "wf_backtest.parquet"
+    fold_path = RESULTS_DIR / asset / "wf_fold_summary.parquet"
+    bt = pd.read_parquet(bt_path) if bt_path.exists() else None
+    folds = pd.read_parquet(fold_path) if fold_path.exists() else None
+    return bt, folds
+
+
 # ---------------------------------------------------------------------------
 # Panel builders
 # ---------------------------------------------------------------------------
@@ -394,6 +403,86 @@ def _panel_performance(regimes_df: pd.DataFrame, signals_df: pd.DataFrame, asset
     st.plotly_chart(fig, use_container_width=True)
 
 
+def _panel_wf_backtest(
+    wf_bt_df: pd.DataFrame,
+    fold_df: pd.DataFrame,
+    regimes_df: pd.DataFrame,
+    asset: str,
+) -> None:
+    st.subheader("Walk-Forward OOS Backtest")
+    st.caption(
+        "All signals are generated using only data available at each bar "
+        "(causal online filtering). No in-sample leakage."
+    )
+
+    # ── Metrics row ──────────────────────────────────────────────────────────
+    net_ret = wf_bt_df["net_return"].dropna()
+    equity = wf_bt_df["equity_curve"].dropna()
+    bars_per_year = 8760.0
+    if len(net_ret) > 1:
+        sharpe = (net_ret.mean() / net_ret.std(ddof=1)) * np.sqrt(bars_per_year)
+        peak = equity.cummax()
+        dd = ((equity - peak) / peak).min()
+        cagr = (equity.iloc[-1] / equity.iloc[0]) ** (bars_per_year / len(equity)) - 1.0
+        total_ret = equity.iloc[-1] / equity.iloc[0] - 1.0
+    else:
+        sharpe = dd = cagr = total_ret = float("nan")
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("OOS Bars", f"{len(net_ret):,}")
+    c2.metric("OOS Folds", str(len(fold_df)) if fold_df is not None else "—")
+    c3.metric("Sharpe (ann)", f"{sharpe:+.3f}" if np.isfinite(sharpe) else "N/A")
+    c4.metric("Max Drawdown", f"{-dd*100:.1f}%" if np.isfinite(dd) else "N/A")
+    c5.metric("Total Return", f"{total_ret*100:+.1f}%" if np.isfinite(total_ret) else "N/A")
+
+    # ── Equity curve vs buy-and-hold ─────────────────────────────────────────
+    initial = equity.iloc[0] if len(equity) > 0 else 10_000.0
+    common_idx = regimes_df.index.intersection(equity.index)
+    if len(common_idx) > 1 and "Close" in regimes_df.columns:
+        bh_close = regimes_df.loc[common_idx, "Close"]
+        bh_equity = initial * bh_close / bh_close.iloc[0]
+    else:
+        bh_equity = None
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scattergl(
+            x=equity.index, y=equity.values,
+            mode="lines", name="OOS Strategy",
+            line=dict(color="#2ca02c", width=1.5),
+        )
+    )
+    if bh_equity is not None:
+        fig.add_trace(
+            go.Scattergl(
+                x=bh_equity.index, y=bh_equity.values,
+                mode="lines", name="Buy & Hold",
+                line=dict(color="#1f77b4", width=1.5, dash="dot"),
+            )
+        )
+    fig.update_layout(
+        title=f"{asset} — Walk-Forward OOS Equity Curve",
+        xaxis=dict(title="Date", rangeslider=dict(visible=True), type="date"),
+        yaxis=dict(title="Portfolio Value ($)"),
+        legend=dict(orientation="h", y=-0.15),
+        hovermode="x unified",
+        margin=dict(t=60, b=40),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ── Per-fold summary ─────────────────────────────────────────────────────
+    if fold_df is not None and len(fold_df) > 0:
+        st.markdown("**Per-fold summary**")
+        display_df = fold_df.copy()
+        display_df.index = display_df.index.strftime("%Y-%m-%d")
+        st.dataframe(
+            display_df.style.format(
+                {"train_log_lik": "{:.1f}", "train_bars": "{:.0f}", "oos_bars": "{:.0f}"}
+            ),
+            use_container_width=True,
+        )
+
+
 # ---------------------------------------------------------------------------
 # Main app
 # ---------------------------------------------------------------------------
@@ -425,6 +514,7 @@ def main() -> None:
             "Signal Chart",
             "Regime Transition Heatmap",
             "Performance Metrics",
+            "Walk-Forward OOS Backtest",
         ]
         selected_panels = st.multiselect(
             "Panels to display",
@@ -488,6 +578,17 @@ def main() -> None:
         else:
             st.warning(
                 f"`results/{asset}/signals.parquet` not found — skipping performance metrics."
+            )
+
+    if "Walk-Forward OOS Backtest" in selected_panels:
+        st.markdown("---")
+        wf_bt_df, wf_fold_df = _load_wf_backtest(asset)
+        if wf_bt_df is not None:
+            _panel_wf_backtest(wf_bt_df, wf_fold_df, regimes_df, asset)
+        else:
+            st.warning(
+                f"`results/{asset}/wf_backtest.parquet` not found. "
+                "Run with `--wf-backtest` to generate it."
             )
 
     # ------------------------------------------------------------------
