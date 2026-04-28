@@ -50,6 +50,15 @@ from rde.analysis.risk_metrics import (
     compute_regime_risk_weighted,
     regime_risk_divergence,
 )
+from rde.analysis.signal_filtering import (
+    EMAConfig,
+    HPConfig,
+    KalmanSmootherConfig,
+    adaptive_kalman_smoother,
+    composite_signal,
+    regime_ema,
+    regime_hp_filter,
+)
 from rde.analysis.portfolio_optimization import (
     EfficientFrontier,
     MVOConfig,
@@ -139,6 +148,14 @@ __all__ = [
     "compute_regime_risk",
     "compute_regime_risk_weighted",
     "regime_risk_divergence",
+    # signal filtering
+    "EMAConfig",
+    "HPConfig",
+    "KalmanSmootherConfig",
+    "regime_ema",
+    "regime_hp_filter",
+    "adaptive_kalman_smoother",
+    "composite_signal",
     # portfolio optimization
     "MVOConfig",
     "RegimeMVOWeights",
