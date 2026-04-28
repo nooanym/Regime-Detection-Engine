@@ -1,5 +1,12 @@
 """HMM training with multi-restart Baum-Welch and AIC/BIC model selection."""
 
+from rde.models.kalman import (
+    KalmanConfig,
+    KalmanFilterResult,
+    RegimeSwitchingKalmanResult,
+    kalman_filter,
+    regime_switching_kalman_filter,
+)
 from rde.models.change_point import (
     BOCPDConfig,
     BOCPDResult,
@@ -38,6 +45,12 @@ from rde.models.spectral_init import (
 from rde.models.student_t_hmm import StudentTHMM
 
 __all__ = [
+    # kalman filter
+    "KalmanConfig",
+    "KalmanFilterResult",
+    "RegimeSwitchingKalmanResult",
+    "kalman_filter",
+    "regime_switching_kalman_filter",
     # change point detection
     "BOCPDConfig",
     "BOCPDResult",
