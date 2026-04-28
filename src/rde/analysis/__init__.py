@@ -50,6 +50,16 @@ from rde.analysis.risk_metrics import (
     compute_regime_risk_weighted,
     regime_risk_divergence,
 )
+from rde.analysis.factor_analysis import (
+    FactorConfig,
+    RegimeFactorResult,
+    RegimeFactors,
+    factor_alignment,
+    factor_return_decomposition,
+    fit_regime_factors,
+    project_to_factors,
+    rolling_factor_exposure,
+)
 from rde.analysis.execution import (
     ExecutionConfig,
     ImpactModelConfig,
@@ -108,6 +118,15 @@ __all__ = [
     "compute_regime_risk",
     "compute_regime_risk_weighted",
     "regime_risk_divergence",
+    # factor analysis
+    "FactorConfig",
+    "RegimeFactors",
+    "RegimeFactorResult",
+    "fit_regime_factors",
+    "factor_alignment",
+    "rolling_factor_exposure",
+    "project_to_factors",
+    "factor_return_decomposition",
     # execution
     "ImpactModelConfig",
     "ExecutionConfig",
