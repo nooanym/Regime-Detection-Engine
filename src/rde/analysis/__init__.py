@@ -50,6 +50,15 @@ from rde.analysis.risk_metrics import (
     compute_regime_risk_weighted,
     regime_risk_divergence,
 )
+from rde.analysis.correlation import (
+    CorrelationConfig,
+    RegimeCorrelation,
+    RegimeCorrelationResult,
+    correlation_breakdown,
+    dynamic_conditional_correlation,
+    regime_correlation,
+    tail_dependence,
+)
 from rde.analysis.backtest import (
     BacktestResult,
     RegimeRule,
@@ -176,6 +185,14 @@ __all__ = [
     "compute_regime_risk",
     "compute_regime_risk_weighted",
     "regime_risk_divergence",
+    # correlation / dependence
+    "CorrelationConfig",
+    "RegimeCorrelation",
+    "RegimeCorrelationResult",
+    "regime_correlation",
+    "dynamic_conditional_correlation",
+    "tail_dependence",
+    "correlation_breakdown",
     # backtesting
     "RegimeRule",
     "RegimeStrategyConfig",
