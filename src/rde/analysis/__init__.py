@@ -50,6 +50,17 @@ from rde.analysis.risk_metrics import (
     compute_regime_risk_weighted,
     regime_risk_divergence,
 )
+from rde.analysis.cointegration import (
+    RegimeCointegrationResult,
+    RegimeSpreadParams,
+    SpreadConfig,
+    fit_regime_spreads,
+    half_life_ornstein_uhlenbeck,
+    regime_half_lives,
+    regime_spread_zscore,
+    spread_zscore,
+    weighted_ols,
+)
 from rde.analysis.factor_analysis import (
     FactorConfig,
     RegimeFactorResult,
@@ -118,6 +129,16 @@ __all__ = [
     "compute_regime_risk",
     "compute_regime_risk_weighted",
     "regime_risk_divergence",
+    # cointegration / spread
+    "SpreadConfig",
+    "RegimeSpreadParams",
+    "RegimeCointegrationResult",
+    "weighted_ols",
+    "half_life_ornstein_uhlenbeck",
+    "fit_regime_spreads",
+    "spread_zscore",
+    "regime_spread_zscore",
+    "regime_half_lives",
     # factor analysis
     "FactorConfig",
     "RegimeFactors",
