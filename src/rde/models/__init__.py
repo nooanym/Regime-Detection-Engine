@@ -1,5 +1,13 @@
 """HMM training with multi-restart Baum-Welch and AIC/BIC model selection."""
 
+from rde.models.simulation import (
+    ScenarioStats,
+    SimulationConfig,
+    SimulationResult,
+    aggregate_scenarios,
+    simulate_garch_regimes,
+    simulate_gaussian_regimes,
+)
 from rde.models.kalman import (
     KalmanConfig,
     KalmanFilterResult,
@@ -45,6 +53,13 @@ from rde.models.spectral_init import (
 from rde.models.student_t_hmm import StudentTHMM
 
 __all__ = [
+    # simulation / monte carlo
+    "SimulationConfig",
+    "SimulationResult",
+    "ScenarioStats",
+    "simulate_gaussian_regimes",
+    "simulate_garch_regimes",
+    "aggregate_scenarios",
     # kalman filter
     "KalmanConfig",
     "KalmanFilterResult",
