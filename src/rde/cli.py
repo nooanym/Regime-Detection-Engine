@@ -48,6 +48,8 @@ from rde.viz.static_plots import (
     plot_transition_heatmap,
 )
 
+_CROSS_ASSET_DIRECTIONS = ("bull_bull", "bull_bear", "bear_bull", "bear_bear")
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -772,3 +774,139 @@ def run(
             f"  {sharpe_str}  {100*rs.max_drawdown:>7.2f}"
         )
     click.echo(f"{'═'*60}\n")
+
+
+@main.command()
+@click.option(
+    "--result",
+    "result_dirs",
+    required=True,
+    multiple=True,
+    type=click.Path(exists=True, file_okay=False),
+    help="Results directory for one asset (e.g. results/BTC-USD). "
+         "Repeat for each asset.",
+)
+@click.option(
+    "--output-dir",
+    "output_dir",
+    default="results/comparison",
+    show_default=True,
+    help="Directory to write comparison outputs.",
+)
+def compare(result_dirs: tuple[str, ...], output_dir: str) -> None:
+    """Cross-asset regime correlation analysis.
+
+    Loads regimes.parquet + regime_analytics.parquet from each --result
+    directory, aligns on the common hourly index, and computes:
+
+    \b
+      - Unconditional pairwise return correlation
+      - Regime-score correlation (how synchronised is regime sentiment?)
+      - Return correlation conditioned on bull/bear joint directions
+      - Regime co-occurrence counts per asset pair
+
+    Writes correlation.parquet, co_occurrence.parquet, and comparison.txt
+    to --output-dir.
+    """
+    from rde.analysis.cross_asset import (
+        CrossAssetResult,
+        compute_cross_asset,
+        load_asset_regime_data,
+    )
+
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+
+    sep = "═" * 60
+    click.echo(f"\n{sep}")
+    click.echo("  Cross-Asset Regime Correlation Analysis")
+    click.echo(sep)
+
+    # ── Load ────────────────────────────────────────────────────────────────
+    data = []
+    for rd in result_dirs:
+        click.echo(f"  Loading  {rd} ...")
+        data.append(load_asset_regime_data(Path(rd)))
+
+    # ── Compute ─────────────────────────────────────────────────────────────
+    result = compute_cross_asset(data)
+    click.echo(
+        f"\n  Common bars: {result.n_common_bars:,}  "
+        f"({result.aligned_returns.index[0].date()} → "
+        f"{result.aligned_returns.index[-1].date()})"
+    )
+
+    # ── Save parquets ────────────────────────────────────────────────────────
+    result.return_corr.to_parquet(out / "return_corr.parquet")
+    result.score_corr.to_parquet(out / "score_corr.parquet")
+    result.aligned_returns.to_parquet(out / "aligned_returns.parquet")
+    result.aligned_scores.to_parquet(out / "aligned_scores.parquet")
+
+    # Flatten conditional correlations
+    cond_rows = []
+    for direction, mat in result.cond_return_corr.items():
+        df = mat.stack().reset_index()
+        df.columns = pd.Index(["asset_a", "asset_b", "correlation"])
+        df["direction"] = direction
+        n_a, n_b = direction.split("_")
+        df = df[df["asset_a"] < df["asset_b"]].copy()
+        cond_rows.append(df)
+    if cond_rows:
+        pd.concat(cond_rows, ignore_index=True).to_parquet(out / "cond_return_corr.parquet")
+
+    # Co-occurrence
+    co_rows = []
+    for (sym_a, sym_b), counts in result.co_occurrence.items():
+        flat = counts.stack().reset_index()
+        flat.columns = pd.Index([sym_a + "_dir", sym_b + "_dir", "count"])
+        flat["asset_a"] = sym_a
+        flat["asset_b"] = sym_b
+        co_rows.append(flat)
+    if co_rows:
+        pd.concat(co_rows, ignore_index=True).to_parquet(out / "co_occurrence.parquet")
+
+    # ── Text report ──────────────────────────────────────────────────────────
+    lines = [
+        sep,
+        "CROSS-ASSET REGIME CORRELATION REPORT",
+        f"Assets:      {result.assets}",
+        f"Common bars: {result.n_common_bars:,}",
+        f"Date range:  {result.aligned_returns.index[0].date()} → "
+        f"{result.aligned_returns.index[-1].date()}",
+        "",
+        "UNCONDITIONAL RETURN CORRELATION",
+        result.return_corr.to_string(float_format=lambda x: f"{x:+.4f}"),
+        "",
+        "REGIME-SCORE CORRELATION (synchrony of regime sentiment)",
+        result.score_corr.to_string(float_format=lambda x: f"{x:+.4f}"),
+        "",
+    ]
+    for direction in _CROSS_ASSET_DIRECTIONS:
+        lines.append(f"CONDITIONAL RETURN CORRELATION  ({direction.replace('_', '/')})")
+        lines.append(
+            result.cond_return_corr[direction].to_string(
+                float_format=lambda x: f"{x:+.4f}" if not np.isnan(x) else "  N/A"
+            )
+        )
+        lines.append("")
+    lines.append("REGIME CO-OCCURRENCE (hours per joint direction)")
+    for (sym_a, sym_b), counts in result.co_occurrence.items():
+        total = counts.values.sum()
+        pct = (counts / total * 100).round(1)
+        lines.append(f"  {sym_a} × {sym_b}")
+        lines.append(counts.to_string())
+        lines.append("  (% of common bars)")
+        lines.append(pct.to_string())
+        lines.append("")
+    lines.append(sep)
+
+    report_path = out / "comparison.txt"
+    report_path.write_text("\n".join(lines) + "\n")
+
+    # ── Summary to stdout ────────────────────────────────────────────────────
+    click.echo("\n  UNCONDITIONAL RETURN CORRELATION")
+    click.echo(result.return_corr.to_string(float_format=lambda x: f"  {x:+.4f}"))
+    click.echo("\n  REGIME-SCORE CORRELATION")
+    click.echo(result.score_corr.to_string(float_format=lambda x: f"  {x:+.4f}"))
+    click.echo(f"\n  Outputs → {out}")
+    click.echo(f"{sep}\n")

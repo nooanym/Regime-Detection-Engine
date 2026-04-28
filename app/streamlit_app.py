@@ -107,6 +107,17 @@ def _load_diagnostics(asset: str) -> str | None:
 
 
 @st.cache_data(show_spinner=False)
+def _load_comparison() -> dict[str, pd.DataFrame | None]:
+    comp_dir = RESULTS_DIR / "comparison"
+    keys = ["return_corr", "score_corr", "cond_return_corr", "co_occurrence"]
+    out: dict[str, pd.DataFrame | None] = {}
+    for k in keys:
+        p = comp_dir / f"{k}.parquet"
+        out[k] = pd.read_parquet(p) if p.exists() else None
+    return out
+
+
+@st.cache_data(show_spinner=False)
 def _load_wf_backtest(asset: str) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
     bt_path = RESULTS_DIR / asset / "wf_backtest.parquet"
     fold_path = RESULTS_DIR / asset / "wf_fold_summary.parquet"
@@ -403,6 +414,81 @@ def _panel_performance(regimes_df: pd.DataFrame, signals_df: pd.DataFrame, asset
     st.plotly_chart(fig, use_container_width=True)
 
 
+def _panel_cross_asset(comp: dict[str, pd.DataFrame | None]) -> None:
+    st.subheader("Cross-Asset Regime Correlation")
+    st.caption(
+        "Run `uv run rde compare --result results/BTC-USD --result results/ETH-USD "
+        "--result results/SPY` to generate this data."
+    )
+
+    ret_corr = comp.get("return_corr")
+    score_corr = comp.get("score_corr")
+    cond_corr = comp.get("cond_return_corr")
+
+    if ret_corr is None:
+        st.warning(
+            "`results/comparison/return_corr.parquet` not found. "
+            "Run `rde compare` to generate comparison outputs."
+        )
+        return
+
+    col1, col2 = st.columns(2)
+
+    def _corr_heatmap(df: pd.DataFrame, title: str) -> go.Figure:
+        fig = go.Figure(
+            go.Heatmap(
+                z=df.values,
+                x=df.columns.tolist(),
+                y=df.index.tolist(),
+                colorscale="RdBu",
+                zmid=0,
+                zmin=-1,
+                zmax=1,
+                text=[[f"{v:+.3f}" for v in row] for row in df.values],
+                texttemplate="%{text}",
+                showscale=True,
+            )
+        )
+        fig.update_layout(
+            title=title,
+            margin=dict(t=50, b=20, l=60, r=20),
+            height=300,
+        )
+        return fig
+
+    with col1:
+        st.plotly_chart(
+            _corr_heatmap(ret_corr, "Return Correlation (unconditional)"),
+            use_container_width=True,
+        )
+    with col2:
+        if score_corr is not None:
+            st.plotly_chart(
+                _corr_heatmap(score_corr, "Regime-Score Correlation"),
+                use_container_width=True,
+            )
+
+    if cond_corr is not None and len(cond_corr) > 0:
+        st.markdown("**Conditional return correlations by joint regime direction**")
+        directions = cond_corr["direction"].unique() if "direction" in cond_corr.columns else []
+        pairs = (
+            cond_corr[["asset_a", "asset_b"]].drop_duplicates()
+            if "asset_a" in cond_corr.columns else pd.DataFrame()
+        )
+        if not pairs.empty:
+            for _, row in pairs.iterrows():
+                sym_a, sym_b = row["asset_a"], row["asset_b"]
+                pair_df = cond_corr[
+                    (cond_corr["asset_a"] == sym_a) & (cond_corr["asset_b"] == sym_b)
+                ][["direction", "correlation"]].set_index("direction")
+                st.markdown(f"*{sym_a} × {sym_b}*")
+                st.dataframe(
+                    pair_df.style.format({"correlation": "{:+.4f}"})
+                    .background_gradient(cmap="RdBu", vmin=-1, vmax=1),
+                    use_container_width=False,
+                )
+
+
 def _panel_wf_backtest(
     wf_bt_df: pd.DataFrame,
     fold_df: pd.DataFrame,
@@ -515,6 +601,7 @@ def main() -> None:
             "Regime Transition Heatmap",
             "Performance Metrics",
             "Walk-Forward OOS Backtest",
+            "Cross-Asset Correlation",
         ]
         selected_panels = st.multiselect(
             "Panels to display",
@@ -589,6 +676,18 @@ def main() -> None:
             st.warning(
                 f"`results/{asset}/wf_backtest.parquet` not found. "
                 "Run with `--wf-backtest` to generate it."
+            )
+
+    if "Cross-Asset Correlation" in selected_panels:
+        st.markdown("---")
+        comp = _load_comparison()
+        if any(v is not None for v in comp.values()):
+            _panel_cross_asset(comp)
+        else:
+            st.warning(
+                "No cross-asset comparison data found. "
+                "Run `uv run rde compare --result results/BTC-USD --result results/ETH-USD` "
+                "to generate it."
             )
 
     # ------------------------------------------------------------------
