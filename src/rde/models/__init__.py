@@ -1,5 +1,11 @@
 """HMM training with multi-restart Baum-Welch and AIC/BIC model selection."""
 
+from rde.models.change_point import (
+    BOCPDConfig,
+    BOCPDResult,
+    align_bocpd_to_regimes,
+    bocpd,
+)
 from rde.models.ensemble import (
     EnsembleConfig,
     EnsembleResult,
@@ -32,6 +38,11 @@ from rde.models.spectral_init import (
 from rde.models.student_t_hmm import StudentTHMM
 
 __all__ = [
+    # change point detection
+    "BOCPDConfig",
+    "BOCPDResult",
+    "bocpd",
+    "align_bocpd_to_regimes",
     # core
     "FittedModel",
     "train_hmm",
