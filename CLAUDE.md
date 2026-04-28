@@ -501,11 +501,48 @@ uv run pytest tests/test_smoke_btc.py
 
 ---
 
-## 9. After Phase 1
+## 9. Current state (as of Phase 30)
 
-When Phase 1 is merged to `main`, move on to Phase 2 (Robustness): multi-restart, AIC/BIC selection, full inference module with the Jurafsky test fixture. Then Phase 3 (Generalization): more configs, plotly plots, transition heatmap. Then Phase 4 (Evaluation depth): persistence, stability, walk-forward harness. Then Phase 5 (Polish): docs, README, v1.0 tag.
+**Phases 0–30 are complete on `main`.** 1038 tests passing. The original v1.0 roadmap (Phases 0–5) is long done; the project has grown into a deep analytics library.
 
-The Notion roadmap and tasks database are the source of truth for sequencing. Update Notion as work progresses — both for our own sake and because Notion is the project's collaborative brain.
+### Completed phases
+
+| Phase | Module | Summary |
+|-------|--------|---------|
+| 0–1 | Core scaffold | Data, features, HMM, inference, viz, labeling, CLI, configs |
+| 2 | `models/hmm.py` | Multi-restart Baum-Welch, AIC/BIC selection |
+| 3–5 | Various | Plotly, transition heatmap, evaluation harness, walk-forward |
+| 6–8 | `models/` | Student-T HMM, GARCH-HMM, semi-Markov (HSMM) |
+| 9–11 | `backtest/`, `evaluation/` | Vectorized backtester, metrics, walk-forward V2 |
+| 12–14 | `analysis/` | Cross-asset, portfolio (Kelly/vol-target), regime VAR/IRF |
+| 15 | `models/` | Spectral init, ensemble HMM |
+| 16 | `analysis/risk_metrics.py` | VaR/CVaR/Sortino/Calmar per regime (hard + soft) |
+| 17 | `models/change_point.py` | BOCPD with Normal-Gamma conjugate prior |
+| 18 | `analysis/information_geometry.py` | KL, JS, Bhattacharyya, Mahalanobis, entropy rate |
+| 19 | `models/kalman.py` | Kalman filter + regime-switching blended filter |
+| 20 | `analysis/drawdown_control.py` | Drawdown hysteresis, regime position limits |
+| 21 | `models/simulation.py` | Gaussian + GARCH-HMM Monte Carlo, scenario aggregation |
+| 22 | `analysis/execution.py` | Square-root impact model, urgency schedule, TWAP/VWAP |
+| 23 | `analysis/factor_analysis.py` | Weighted PCA per regime, rolling factor exposure |
+| 24 | `analysis/cointegration.py` | OU half-life, weighted OLS spread, regime Z-score |
+| 25 | `analysis/portfolio_optimization.py` | MVO (min-var/max-Sharpe), efficient frontier, Black-Litterman |
+| 26 | `analysis/signal_filtering.py` | Regime-adaptive EMA, HP filter, RTS Kalman smoother |
+| 27 | `analysis/transition_prediction.py` | Logistic next-regime predictor, h-step matrix power, dwell time |
+| 28 | `analysis/tail_risk.py` | GPD tail fitting, extrapolated VaR/ES, stress scenarios |
+| 29 | `analysis/backtest.py` | Regime-conditional strategy engine, tearsheet metrics |
+| 30 | `analysis/correlation.py` | Weighted Pearson/Spearman/Kendall, DCC blending, tail dependence |
+
+### Picking up from here
+
+The core HMM engine and all analytics modules are stable. Possible next directions (coordinate with Notion):
+
+- **Phase 31+**: Interactive dashboard / notebook showcase using real BTC data end-to-end
+- **Phase 31+**: Additional asset configs (ETH, SPY, QQQ) and cross-asset regime concordance
+- **Phase 31+**: Online/streaming regime updates (incremental Baum-Welch)
+- **Phase 31+**: CLI commands wiring the new analysis modules into `rde run`
+- **v2.0 release tag** once the analytics layer has a complete integration test
+
+The Notion roadmap and tasks database are the source of truth for sequencing. Update Notion as work progresses.
 
 ---
 
