@@ -50,6 +50,16 @@ from rde.analysis.risk_metrics import (
     compute_regime_risk_weighted,
     regime_risk_divergence,
 )
+from rde.analysis.portfolio_optimization import (
+    EfficientFrontier,
+    MVOConfig,
+    RegimeMVOResult,
+    RegimeMVOWeights,
+    black_litterman_posterior,
+    blended_mvo,
+    efficient_frontier,
+    regime_mvo,
+)
 from rde.analysis.cointegration import (
     RegimeCointegrationResult,
     RegimeSpreadParams,
@@ -129,6 +139,15 @@ __all__ = [
     "compute_regime_risk",
     "compute_regime_risk_weighted",
     "regime_risk_divergence",
+    # portfolio optimization
+    "MVOConfig",
+    "RegimeMVOWeights",
+    "RegimeMVOResult",
+    "EfficientFrontier",
+    "regime_mvo",
+    "blended_mvo",
+    "efficient_frontier",
+    "black_litterman_posterior",
     # cointegration / spread
     "SpreadConfig",
     "RegimeSpreadParams",
