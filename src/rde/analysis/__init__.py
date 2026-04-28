@@ -50,6 +50,18 @@ from rde.analysis.risk_metrics import (
     compute_regime_risk_weighted,
     regime_risk_divergence,
 )
+from rde.analysis.execution import (
+    ExecutionConfig,
+    ImpactModelConfig,
+    OrderSchedule,
+    RegimeImpactParams,
+    estimate_regime_impact,
+    expected_slippage,
+    optimal_order_schedule,
+    slippage_attribution,
+    twap_schedule,
+    vwap_schedule,
+)
 
 __all__ = [
     # cross-asset
@@ -96,4 +108,15 @@ __all__ = [
     "compute_regime_risk",
     "compute_regime_risk_weighted",
     "regime_risk_divergence",
+    # execution
+    "ImpactModelConfig",
+    "ExecutionConfig",
+    "RegimeImpactParams",
+    "OrderSchedule",
+    "estimate_regime_impact",
+    "expected_slippage",
+    "optimal_order_schedule",
+    "twap_schedule",
+    "vwap_schedule",
+    "slippage_attribution",
 ]
