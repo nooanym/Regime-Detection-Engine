@@ -50,6 +50,15 @@ from rde.analysis.risk_metrics import (
     compute_regime_risk_weighted,
     regime_risk_divergence,
 )
+from rde.analysis.transition_prediction import (
+    RegimeTransitionPredictor,
+    TransitionPredictorConfig,
+    blend_hmm_logistic,
+    expected_regime_duration,
+    multi_step_transition,
+    persistence_forecast,
+    transition_entropy_trajectory,
+)
 from rde.analysis.signal_filtering import (
     EMAConfig,
     HPConfig,
@@ -148,6 +157,14 @@ __all__ = [
     "compute_regime_risk",
     "compute_regime_risk_weighted",
     "regime_risk_divergence",
+    # transition prediction
+    "TransitionPredictorConfig",
+    "RegimeTransitionPredictor",
+    "multi_step_transition",
+    "persistence_forecast",
+    "expected_regime_duration",
+    "blend_hmm_logistic",
+    "transition_entropy_trajectory",
     # signal filtering
     "EMAConfig",
     "HPConfig",
