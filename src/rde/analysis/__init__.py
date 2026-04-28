@@ -50,6 +50,14 @@ from rde.analysis.risk_metrics import (
     compute_regime_risk_weighted,
     regime_risk_divergence,
 )
+from rde.analysis.backtest import (
+    BacktestResult,
+    RegimeRule,
+    RegimeStrategyConfig,
+    backtest_tearsheet,
+    regime_performance_attribution,
+    run_backtest,
+)
 from rde.analysis.tail_risk import (
     GPDParams,
     RegimeTailResult,
@@ -168,6 +176,13 @@ __all__ = [
     "compute_regime_risk",
     "compute_regime_risk_weighted",
     "regime_risk_divergence",
+    # backtesting
+    "RegimeRule",
+    "RegimeStrategyConfig",
+    "BacktestResult",
+    "run_backtest",
+    "regime_performance_attribution",
+    "backtest_tearsheet",
     # tail risk / EVT
     "TailConfig",
     "GPDParams",
