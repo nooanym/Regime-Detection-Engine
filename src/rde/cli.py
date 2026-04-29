@@ -910,3 +910,11 @@ def compare(result_dirs: tuple[str, ...], output_dir: str) -> None:
     click.echo(result.score_corr.to_string(float_format=lambda x: f"  {x:+.4f}"))
     click.echo(f"\n  Outputs → {out}")
     click.echo(f"{sep}\n")
+
+
+# ---------------------------------------------------------------------------
+# Phase 31: analysis pipeline command
+# ---------------------------------------------------------------------------
+
+from rde.analyse_cmd import analyse_cmd  # noqa: E402
+main.add_command(analyse_cmd)

@@ -140,6 +140,18 @@ from rde.analysis.execution import (
     vwap_schedule,
 )
 
+from rde.analysis.pipeline import (
+    AnalysisConfig,
+    AnalysisPipeline,
+    AnalysisReport,
+)
+from rde.analysis.reporting import (
+    report_to_dict,
+    report_to_json,
+    report_to_markdown,
+    save_report,
+)
+
 __all__ = [
     # cross-asset
     "AssetRegimeData",
@@ -265,4 +277,12 @@ __all__ = [
     "twap_schedule",
     "vwap_schedule",
     "slippage_attribution",
+    # Phase 31 — analysis pipeline + reporting
+    "AnalysisConfig",
+    "AnalysisPipeline",
+    "AnalysisReport",
+    "report_to_dict",
+    "report_to_json",
+    "report_to_markdown",
+    "save_report",
 ]
