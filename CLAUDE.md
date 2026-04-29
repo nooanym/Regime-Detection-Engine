@@ -501,9 +501,9 @@ uv run pytest tests/test_smoke_btc.py
 
 ---
 
-## 9. Current state (as of Phase 32)
+## 9. Current state (as of Phase 33)
 
-**Phases 0–32 are complete on `main`.** 1108 tests passing. The original v1.0 roadmap (Phases 0–5) is long done; the project has grown into a deep analytics library with a full interactive dashboard.
+**Phases 0–33 are complete on `main`.** 1108 tests passing. The original v1.0 roadmap (Phases 0–5) is long done; the project has grown into a deep analytics library with a full interactive dashboard.
 
 ### Completed phases
 
@@ -533,20 +533,22 @@ uv run pytest tests/test_smoke_btc.py
 | 30 | `analysis/correlation.py` | Weighted Pearson/Spearman/Kendall, DCC blending, tail dependence |
 | 31 | `analysis/pipeline.py`, `analysis/reporting.py`, `analyse_cmd.py` | `AnalysisPipeline` orchestrating all Phase 22–30 modules; `rde analyse` CLI; JSON + Markdown reports |
 | 32 | `app/panels_analysis.py`, `app/streamlit_app.py` | Dashboard: 8 new Plotly panels surfacing Phase 31 analysis output (tail risk, factors, transitions, correlation, portfolio, cointegration, execution) |
+| 33 | `app/streamlit_app.py`, `analysis/cross_asset.py`, `cli.py` | Current State panel (streak, posterior probabilities); sidebar date range filter + data freshness badge; cross-asset `resample_freq` parameter; `rde compare --daily` flag for mixed-market alignment |
 
 ### Running the dashboard
 
 ```bash
 uv run rde run --config configs/btc.yaml          # generate regimes + signals
 uv run rde analyse --config configs/btc.yaml      # generate analysis_report.json
-streamlit run app/streamlit_app.py                # open dashboard
+uv run rde compare --result results/BTC-USD --result results/ETH-USD --result results/SPY --daily
+uv run streamlit run app/streamlit_app.py         # open dashboard
 ```
 
 ### Picking up from here
 
 The analytics layer and dashboard are complete. Possible next directions (coordinate with Notion):
 
-- **Phase 33+**: Live data feed — replace `YFinanceSource` with Binance/Coinbase WebSocket streaming
+- **Phase 34+**: Live data feed — replace `YFinanceSource` with Binance/Coinbase WebSocket streaming
 - **Phase 33+**: Online regime inference — `OnlineDecoder` consuming a real-time bar queue
 - **Phase 33+**: Paper trading loop — regime → signal → ccxt order on Binance testnet
 - **Phase 33+**: Additional asset configs (ETH, SPY, QQQ) and cross-asset regime concordance

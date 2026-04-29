@@ -793,7 +793,15 @@ def run(
     show_default=True,
     help="Directory to write comparison outputs.",
 )
-def compare(result_dirs: tuple[str, ...], output_dir: str) -> None:
+@click.option(
+    "--daily",
+    "resample_daily",
+    is_flag=True,
+    default=False,
+    help="Resample all assets to daily frequency before alignment. "
+         "Required when mixing crypto (24/7) with equities (market hours).",
+)
+def compare(result_dirs: tuple[str, ...], output_dir: str, resample_daily: bool) -> None:
     """Cross-asset regime correlation analysis.
 
     Loads regimes.parquet + regime_analytics.parquet from each --result
@@ -807,6 +815,9 @@ def compare(result_dirs: tuple[str, ...], output_dir: str) -> None:
 
     Writes correlation.parquet, co_occurrence.parquet, and comparison.txt
     to --output-dir.
+
+    When mixing 24/7 crypto with equity data (e.g. BTC-USD + SPY), use
+    --daily to resample everything to daily returns before aligning.
     """
     from rde.analysis.cross_asset import (
         CrossAssetResult,
@@ -829,7 +840,10 @@ def compare(result_dirs: tuple[str, ...], output_dir: str) -> None:
         data.append(load_asset_regime_data(Path(rd)))
 
     # ── Compute ─────────────────────────────────────────────────────────────
-    result = compute_cross_asset(data)
+    resample_freq = "1D" if resample_daily else None
+    if resample_freq:
+        click.echo("  Resampling to daily frequency (--daily)")
+    result = compute_cross_asset(data, resample_freq=resample_freq)
     click.echo(
         f"\n  Common bars: {result.n_common_bars:,}  "
         f"({result.aligned_returns.index[0].date()} → "

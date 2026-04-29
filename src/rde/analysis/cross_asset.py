@@ -122,7 +122,8 @@ def _sharpe_scores(analytics_df: pd.DataFrame) -> np.ndarray:
     if n == 1:
         return np.array([0.0])
 
-    sharpe = analytics_df.set_index("state")["sharpe_ann"].fillna(0.0)
+    sharpe = (analytics_df["sharpe_ann"] if "sharpe_ann" in analytics_df.columns
+              else analytics_df.set_index("state")["sharpe_ann"]).fillna(0.0)
     ranks = sharpe.rank(method="average") - 1.0  # 0-based
     scores = 2.0 * ranks / (n - 1) - 1.0
     return scores.values
@@ -203,7 +204,10 @@ def load_asset_regime_data(result_dir: Path | str) -> AssetRegimeData:
     )
 
 
-def compute_cross_asset(data: list[AssetRegimeData]) -> CrossAssetResult:
+def compute_cross_asset(
+    data: list[AssetRegimeData],
+    resample_freq: str | None = None,
+) -> CrossAssetResult:
     """Compute cross-asset regime correlation statistics.
 
     Parameters
@@ -211,6 +215,11 @@ def compute_cross_asset(data: list[AssetRegimeData]) -> CrossAssetResult:
     data : list[AssetRegimeData]
         Per-asset data from :func:`load_asset_regime_data`.
         Must contain at least 2 assets.
+    resample_freq : str or None
+        If given (e.g. ``"1D"``), resample all series to this frequency
+        before aligning.  Returns are summed; regime scores take the last
+        value in each period.  Useful when mixing crypto (24/7 hourly) with
+        equities (market-hours hourly) whose bar timestamps don't line up.
 
     Returns
     -------
@@ -224,6 +233,24 @@ def compute_cross_asset(data: list[AssetRegimeData]) -> CrossAssetResult:
     if len(data) < 2:
         raise ValueError(f"Need at least 2 assets, got {len(data)}.")
 
+    # ── Optional resampling ───────────────────────────────────────────────────
+    if resample_freq is not None:
+        resampled: list[AssetRegimeData] = []
+        for d in data:
+            ret_rs = d.returns.resample(resample_freq).sum()
+            score_rs = d.regime_score.resample(resample_freq).last()
+            label_rs = d.regime_label.resample(resample_freq).last()
+            resampled.append(
+                AssetRegimeData(
+                    symbol=d.symbol,
+                    returns=ret_rs,
+                    regime_score=score_rs,
+                    regime_label=label_rs,
+                )
+            )
+        data = resampled
+        logger.info("Resampled all assets to %s frequency", resample_freq)
+
     # ── Align on common index ─────────────────────────────────────────────────
     common_idx = data[0].returns.index
     for d in data[1:]:
@@ -232,7 +259,8 @@ def compute_cross_asset(data: list[AssetRegimeData]) -> CrossAssetResult:
     if len(common_idx) == 0:
         raise ValueError(
             "No overlapping timestamps across assets. "
-            "Check that all assets use the same period and interval."
+            "Check that all assets use the same period and interval. "
+            "For mixed markets (crypto + equities), try resample_freq='1D'."
         )
 
     symbols = [d.symbol for d in data]

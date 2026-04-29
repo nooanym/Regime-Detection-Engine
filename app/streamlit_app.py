@@ -605,6 +605,85 @@ def _panel_wf_backtest(
 # ---------------------------------------------------------------------------
 
 
+def _data_freshness(asset: str) -> str:
+    """Return a human-readable age string for the regimes parquet."""
+    import time
+    path = RESULTS_DIR / asset / "regimes.parquet"
+    if not path.exists():
+        return "no data"
+    age_s = time.time() - path.stat().st_mtime
+    if age_s < 3600:
+        return f"{int(age_s / 60)}m ago"
+    if age_s < 86400:
+        return f"{int(age_s / 3600)}h ago"
+    return f"{int(age_s / 86400)}d ago"
+
+
+def _panel_current_state(
+    regimes_df: pd.DataFrame,
+    signals_df: pd.DataFrame | None,
+    asset: str,
+) -> None:
+    """Show the most recent regime, price, signal, and posterior probabilities."""
+    st.subheader("Current State")
+
+    latest = regimes_df.iloc[-1]
+    current_regime = int(latest["regime"])
+    current_label = str(latest["regime_label"])
+    current_price = float(latest["Close"])
+    current_date = str(regimes_df.index[-1])[:16]
+
+    # Streak: consecutive bars in current regime
+    states = regimes_df["regime"].values
+    streak = 1
+    for i in range(len(states) - 2, -1, -1):
+        if states[i] == current_regime:
+            streak += 1
+        else:
+            break
+    streak_label = f"≈{streak/24:.1f}d" if streak >= 48 else f"≈{streak}h"
+
+    # Latest signal
+    current_signal = None
+    if signals_df is not None and "signal" in signals_df.columns:
+        common = regimes_df.index.intersection(signals_df.index)
+        if len(common) > 0:
+            current_signal = float(signals_df.loc[common[-1], "signal"])
+
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("Price", f"${current_price:,.0f}")
+    col2.metric("Regime", f"#{current_regime}", delta=current_label, delta_color="off")
+    col3.metric("Streak", f"{streak} bars", delta=streak_label, delta_color="off")
+    if current_signal is not None:
+        direction = "↑ Long" if current_signal > 0.25 else ("↓ Short" if current_signal < -0.25 else "→ Flat")
+        delta_color = "normal" if current_signal > 0.25 else ("inverse" if current_signal < -0.25 else "off")
+        col4.metric("Signal", f"{current_signal:+.3f}", delta=direction, delta_color=delta_color)
+    col5.metric("As Of", current_date)
+
+    # Posterior probability bar chart
+    proba_cols = [c for c in regimes_df.columns if c.startswith("regime_proba_")]
+    if proba_cols:
+        probas = [float(latest[c]) for c in proba_cols]
+        labels = [regimes_df.loc[regimes_df["regime"] == k, "regime_label"].iloc[0]
+                  if (regimes_df["regime"] == k).any() else f"Regime {k}"
+                  for k in range(len(probas))]
+        fig = go.Figure(go.Bar(
+            x=[f"#{k} {labels[k]}" for k in range(len(probas))],
+            y=probas,
+            marker_color=[_PALETTE[k % len(_PALETTE)] for k in range(len(probas))],
+            text=[f"{p:.1%}" for p in probas],
+            textposition="outside",
+        ))
+        fig.update_layout(
+            title=f"{asset} — Posterior Regime Probabilities (latest bar: {current_date})",
+            yaxis=dict(title="Probability", range=[0, 1.15]),
+            height=260,
+            margin=dict(t=40, b=20, l=40, r=20),
+            xaxis_tickangle=-20,
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+
 def main() -> None:
     st.title("Regime Detection Engine — Live Dashboard")
 
@@ -624,7 +703,12 @@ def main() -> None:
 
         asset = st.selectbox("Asset", assets, index=0)
 
+        # Data freshness badge
+        freshness = _data_freshness(asset)
+        st.caption(f"Data: **{freshness}** — rerun app to refresh cache")
+
         all_panels = [
+            "Current State",           # Phase 33 — always first
             "Regime Overview",
             "Price with Regimes",
             "Regime Analytics Table",
@@ -646,14 +730,16 @@ def main() -> None:
         selected_panels = st.multiselect(
             "Panels to display",
             options=all_panels,
-            default=all_panels[:8],
+            default=all_panels[:9],   # Current State + original 8
         )
 
         st.markdown("---")
-        st.caption("Data is cached per session. Rerun to refresh.")
+
+        # Date range filter
+        st.markdown("**Date range**")
 
     # ------------------------------------------------------------------
-    # Load data
+    # Load data (before date filter so we know the full range)
     # ------------------------------------------------------------------
     with st.spinner(f"Loading results for {asset}…"):
         regimes_df = _load_regimes(asset)
@@ -668,9 +754,32 @@ def main() -> None:
         st.error(f"`results/{asset}/regimes.parquet` not found. Run the pipeline first.")
         st.stop()
 
+    # Date range filter (in sidebar, but needs data loaded first)
+    with st.sidebar:
+        import datetime as _dt
+        idx = regimes_df.index
+        min_dt = idx.min().to_pydatetime().date()
+        max_dt = idx.max().to_pydatetime().date()
+        date_from, date_to = st.date_input(
+            "From / To",
+            value=(min_dt, max_dt),
+            min_value=min_dt,
+            max_value=max_dt,
+            label_visibility="collapsed",
+        )
+        if isinstance(date_from, _dt.date) and isinstance(date_to, _dt.date):
+            _mask = (idx.date >= date_from) & (idx.date <= date_to)
+            regimes_df = regimes_df.loc[_mask]
+            if signals_df is not None:
+                signals_df = signals_df.loc[signals_df.index.isin(regimes_df.index)]
+
     # ------------------------------------------------------------------
     # Render selected panels
     # ------------------------------------------------------------------
+
+    if "Current State" in selected_panels:
+        st.markdown("---")
+        _panel_current_state(_load_regimes(asset), _load_signals(asset), asset)
 
     if "Regime Overview" in selected_panels:
         st.markdown("---")
