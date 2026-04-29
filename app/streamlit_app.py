@@ -126,6 +126,37 @@ def _load_wf_backtest(asset: str) -> tuple[pd.DataFrame | None, pd.DataFrame | N
     return bt, folds
 
 
+@st.cache_data(show_spinner=False)
+def _load_analysis_report(asset: str) -> dict | None:
+    """Load Phase 31 analysis report JSON if it exists."""
+    import json
+    path = RESULTS_DIR / asset / "analysis" / "analysis_report.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+try:
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).parent))
+    from panels_analysis import (
+        _panel_execution,
+        _panel_factor_analysis,
+        _panel_tail_risk,
+        _panel_transition,
+        _panel_correlation,
+        _panel_cointegration,
+        _panel_portfolio,
+        _panel_analysis_markdown,
+    )
+    _ANALYSIS_PANELS_AVAILABLE = True
+except ImportError:
+    _ANALYSIS_PANELS_AVAILABLE = False
+
 # ---------------------------------------------------------------------------
 # Panel builders
 # ---------------------------------------------------------------------------
@@ -602,11 +633,20 @@ def main() -> None:
             "Performance Metrics",
             "Walk-Forward OOS Backtest",
             "Cross-Asset Correlation",
+            # Phase 32 — analysis pipeline panels
+            "Execution & Market Impact",
+            "Factor Analysis",
+            "Tail Risk (EVT)",
+            "Regime Transitions",
+            "Correlation Structure",
+            "Cointegration",
+            "Portfolio Optimisation",
+            "Full Analysis Report",
         ]
         selected_panels = st.multiselect(
             "Panels to display",
             options=all_panels,
-            default=all_panels,
+            default=all_panels[:8],
         )
 
         st.markdown("---")
@@ -619,6 +659,10 @@ def main() -> None:
         regimes_df = _load_regimes(asset)
         analytics_df = _load_analytics(asset)
         signals_df = _load_signals(asset)
+        analysis_report = _load_analysis_report(asset)
+        feature_names_from_report = (
+            analysis_report.get("feature_names", []) if analysis_report else []
+        )
 
     if regimes_df is None:
         st.error(f"`results/{asset}/regimes.parquet` not found. Run the pipeline first.")
@@ -689,6 +733,68 @@ def main() -> None:
                 "Run `uv run rde compare --result results/BTC-USD --result results/ETH-USD` "
                 "to generate it."
             )
+
+    if "Execution & Market Impact" in selected_panels:
+        st.markdown("---")
+        if _ANALYSIS_PANELS_AVAILABLE:
+            if analysis_report is not None:
+                _panel_execution(analysis_report)
+            else:
+                st.warning(
+                    f"No analysis report found for {asset}. "
+                    "Run `uv run rde analyse --config configs/<asset>.yaml` to generate it."
+                )
+        else:
+            st.warning("panels_analysis.py not found — run `rde analyse` and refresh.")
+
+    if "Factor Analysis" in selected_panels:
+        st.markdown("---")
+        if _ANALYSIS_PANELS_AVAILABLE and analysis_report is not None:
+            _panel_factor_analysis(analysis_report, feature_names_from_report)
+        elif _ANALYSIS_PANELS_AVAILABLE:
+            st.warning(f"No analysis report found for {asset}.")
+
+    if "Tail Risk (EVT)" in selected_panels:
+        st.markdown("---")
+        if _ANALYSIS_PANELS_AVAILABLE and analysis_report is not None:
+            _panel_tail_risk(analysis_report)
+        elif _ANALYSIS_PANELS_AVAILABLE:
+            st.warning(f"No analysis report found for {asset}.")
+
+    if "Regime Transitions" in selected_panels:
+        st.markdown("---")
+        if _ANALYSIS_PANELS_AVAILABLE and analysis_report is not None:
+            _panel_transition(analysis_report)
+        elif _ANALYSIS_PANELS_AVAILABLE:
+            st.warning(f"No analysis report found for {asset}.")
+
+    if "Correlation Structure" in selected_panels:
+        st.markdown("---")
+        if _ANALYSIS_PANELS_AVAILABLE and analysis_report is not None:
+            _panel_correlation(analysis_report, feature_names_from_report)
+        elif _ANALYSIS_PANELS_AVAILABLE:
+            st.warning(f"No analysis report found for {asset}.")
+
+    if "Cointegration" in selected_panels:
+        st.markdown("---")
+        if _ANALYSIS_PANELS_AVAILABLE and analysis_report is not None:
+            _panel_cointegration(analysis_report, feature_names_from_report)
+        elif _ANALYSIS_PANELS_AVAILABLE:
+            st.warning(f"No analysis report found for {asset}.")
+
+    if "Portfolio Optimisation" in selected_panels:
+        st.markdown("---")
+        if _ANALYSIS_PANELS_AVAILABLE and analysis_report is not None:
+            _panel_portfolio(analysis_report, feature_names_from_report)
+        elif _ANALYSIS_PANELS_AVAILABLE:
+            st.warning(f"No analysis report found for {asset}.")
+
+    if "Full Analysis Report" in selected_panels:
+        st.markdown("---")
+        if _ANALYSIS_PANELS_AVAILABLE:
+            _panel_analysis_markdown(RESULTS_DIR / asset)
+        else:
+            st.warning("panels_analysis.py not found.")
 
     # ------------------------------------------------------------------
     # Raw diagnostics expander

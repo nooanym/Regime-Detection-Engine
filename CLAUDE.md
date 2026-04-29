@@ -501,9 +501,9 @@ uv run pytest tests/test_smoke_btc.py
 
 ---
 
-## 9. Current state (as of Phase 30)
+## 9. Current state (as of Phase 32)
 
-**Phases 0–30 are complete on `main`.** 1038 tests passing. The original v1.0 roadmap (Phases 0–5) is long done; the project has grown into a deep analytics library.
+**Phases 0–32 are complete on `main`.** 1108 tests passing. The original v1.0 roadmap (Phases 0–5) is long done; the project has grown into a deep analytics library with a full interactive dashboard.
 
 ### Completed phases
 
@@ -531,16 +531,26 @@ uv run pytest tests/test_smoke_btc.py
 | 28 | `analysis/tail_risk.py` | GPD tail fitting, extrapolated VaR/ES, stress scenarios |
 | 29 | `analysis/backtest.py` | Regime-conditional strategy engine, tearsheet metrics |
 | 30 | `analysis/correlation.py` | Weighted Pearson/Spearman/Kendall, DCC blending, tail dependence |
+| 31 | `analysis/pipeline.py`, `analysis/reporting.py`, `analyse_cmd.py` | `AnalysisPipeline` orchestrating all Phase 22–30 modules; `rde analyse` CLI; JSON + Markdown reports |
+| 32 | `app/panels_analysis.py`, `app/streamlit_app.py` | Dashboard: 8 new Plotly panels surfacing Phase 31 analysis output (tail risk, factors, transitions, correlation, portfolio, cointegration, execution) |
+
+### Running the dashboard
+
+```bash
+uv run rde run --config configs/btc.yaml          # generate regimes + signals
+uv run rde analyse --config configs/btc.yaml      # generate analysis_report.json
+streamlit run app/streamlit_app.py                # open dashboard
+```
 
 ### Picking up from here
 
-The core HMM engine and all analytics modules are stable. Possible next directions (coordinate with Notion):
+The analytics layer and dashboard are complete. Possible next directions (coordinate with Notion):
 
-- **Phase 31+**: Interactive dashboard / notebook showcase using real BTC data end-to-end
-- **Phase 31+**: Additional asset configs (ETH, SPY, QQQ) and cross-asset regime concordance
-- **Phase 31+**: Online/streaming regime updates (incremental Baum-Welch)
-- **Phase 31+**: CLI commands wiring the new analysis modules into `rde run`
-- **v2.0 release tag** once the analytics layer has a complete integration test
+- **Phase 33+**: Live data feed — replace `YFinanceSource` with Binance/Coinbase WebSocket streaming
+- **Phase 33+**: Online regime inference — `OnlineDecoder` consuming a real-time bar queue
+- **Phase 33+**: Paper trading loop — regime → signal → ccxt order on Binance testnet
+- **Phase 33+**: Additional asset configs (ETH, SPY, QQQ) and cross-asset regime concordance
+- **v2.0 release tag** — analytics layer + dashboard complete; add git tag once integration test passes
 
 The Notion roadmap and tasks database are the source of truth for sequencing. Update Notion as work progresses.
 
