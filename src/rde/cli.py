@@ -932,3 +932,9 @@ def compare(result_dirs: tuple[str, ...], output_dir: str, resample_daily: bool)
 
 from rde.analyse_cmd import analyse_cmd  # noqa: E402
 main.add_command(analyse_cmd)
+
+# Phase 35: paper trading loop command
+# ---------------------------------------------------------------------------
+
+from rde.trade_cmd import trade_cmd  # noqa: E402
+main.add_command(trade_cmd)

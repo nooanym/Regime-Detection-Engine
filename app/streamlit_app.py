@@ -157,6 +157,12 @@ try:
 except ImportError:
     _ANALYSIS_PANELS_AVAILABLE = False
 
+try:
+    from panels_live import _panel_live_feed
+    _LIVE_PANEL_AVAILABLE = True
+except ImportError:
+    _LIVE_PANEL_AVAILABLE = False
+
 # ---------------------------------------------------------------------------
 # Panel builders
 # ---------------------------------------------------------------------------
@@ -708,7 +714,8 @@ def main() -> None:
         st.caption(f"Data: **{freshness}** — rerun app to refresh cache")
 
         all_panels = [
-            "Current State",           # Phase 33 — always first
+            "Current State",           # Phase 33
+            "Live Feed",               # Phase 34 — OnlineDecoder
             "Regime Overview",
             "Price with Regimes",
             "Regime Analytics Table",
@@ -730,7 +737,7 @@ def main() -> None:
         selected_panels = st.multiselect(
             "Panels to display",
             options=all_panels,
-            default=all_panels[:9],   # Current State + original 8
+            default=all_panels[:10],   # Current State + Live Feed + original 8
         )
 
         st.markdown("---")
@@ -780,6 +787,13 @@ def main() -> None:
     if "Current State" in selected_panels:
         st.markdown("---")
         _panel_current_state(_load_regimes(asset), _load_signals(asset), asset)
+
+    if "Live Feed" in selected_panels:
+        st.markdown("---")
+        if _LIVE_PANEL_AVAILABLE:
+            _panel_live_feed(asset, RESULTS_DIR / asset)
+        else:
+            st.warning("panels_live.py not found — refresh the app.")
 
     if "Regime Overview" in selected_panels:
         st.markdown("---")

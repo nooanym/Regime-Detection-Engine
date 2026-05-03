@@ -1,5 +1,6 @@
 # CLAUDE.md — Regime Detection Engine
 
+
 > This file is read by Claude Code on every session. It is the single source of truth for what we are building, how, and why. **Update this file whenever architectural decisions change.** The Notion workspace at `Regime Detection Engine` holds living project management; this file holds invariants for the codebase.
 
 ---
@@ -501,9 +502,9 @@ uv run pytest tests/test_smoke_btc.py
 
 ---
 
-## 9. Current state (as of Phase 33)
+## 9. Current state (as of Phase 35)
 
-**Phases 0–33 are complete on `main`.** 1108 tests passing. The original v1.0 roadmap (Phases 0–5) is long done; the project has grown into a deep analytics library with a full interactive dashboard.
+**Phases 0–35 are complete on `main`.** 1238 tests passing. The system now includes a full live paper-trading loop connecting the HMM regime engine to a simulated exchange.
 
 ### Completed phases
 
@@ -532,27 +533,40 @@ uv run pytest tests/test_smoke_btc.py
 | 29 | `analysis/backtest.py` | Regime-conditional strategy engine, tearsheet metrics |
 | 30 | `analysis/correlation.py` | Weighted Pearson/Spearman/Kendall, DCC blending, tail dependence |
 | 31 | `analysis/pipeline.py`, `analysis/reporting.py`, `analyse_cmd.py` | `AnalysisPipeline` orchestrating all Phase 22–30 modules; `rde analyse` CLI; JSON + Markdown reports |
-| 32 | `app/panels_analysis.py`, `app/streamlit_app.py` | Dashboard: 8 new Plotly panels surfacing Phase 31 analysis output (tail risk, factors, transitions, correlation, portfolio, cointegration, execution) |
-| 33 | `app/streamlit_app.py`, `analysis/cross_asset.py`, `cli.py` | Current State panel (streak, posterior probabilities); sidebar date range filter + data freshness badge; cross-asset `resample_freq` parameter; `rde compare --daily` flag for mixed-market alignment |
+| 32 | `app/panels_analysis.py`, `app/streamlit_app.py` | Dashboard: 8 new Plotly panels surfacing Phase 31 analysis output |
+| 33 | `app/streamlit_app.py`, `analysis/cross_asset.py`, `cli.py` | Current State panel; date range filter; `rde compare --daily` for mixed-market alignment |
+| 34 | `trading/` module, `analysis/regime_concordance.py`, `app/panels_live.py`, `configs/` | Paper portfolio, exchange abstraction (MockExchange + BinanceTestnet), regime-change alerting, Live Feed dashboard panel, QQQ/GLD/SOL configs, cross-asset concordance analysis |
+| 35 | `trading/loop.py`, `trade_cmd.py`, `cli.py` | `TradingLoop` (OnlineDecoder → strategy → PaperPortfolio → alerts); `rde trade` CLI with live-polling and `--backtest` replay modes |
 
-### Running the dashboard
+### Full pipeline (paper trading)
 
 ```bash
-uv run rde run --config configs/btc.yaml          # generate regimes + signals
-uv run rde analyse --config configs/btc.yaml      # generate analysis_report.json
+# 1. Generate model + regimes
+uv run rde run --config configs/btc.yaml --save-model results/BTC-USD/model.pkl
+
+# 2. Run analysis reports
+uv run rde analyse --config configs/btc.yaml
+
+# 3. Cross-asset comparison
 uv run rde compare --result results/BTC-USD --result results/ETH-USD --result results/SPY --daily
-uv run streamlit run app/streamlit_app.py         # open dashboard
+
+# 4. Paper-trade backtest on historical data
+uv run rde trade --model results/BTC-USD/model.pkl --config configs/btc.yaml --backtest
+
+# 5. Live paper-trading loop (polls yfinance every 60s)
+uv run rde trade --model results/BTC-USD/model.pkl --config configs/btc.yaml
+
+# 6. Dashboard
+uv run streamlit run app/streamlit_app.py
 ```
 
 ### Picking up from here
 
-The analytics layer and dashboard are complete. Possible next directions (coordinate with Notion):
-
-- **Phase 34+**: Live data feed — replace `YFinanceSource` with Binance/Coinbase WebSocket streaming
-- **Phase 33+**: Online regime inference — `OnlineDecoder` consuming a real-time bar queue
-- **Phase 33+**: Paper trading loop — regime → signal → ccxt order on Binance testnet
-- **Phase 33+**: Additional asset configs (ETH, SPY, QQQ) and cross-asset regime concordance
-- **v2.0 release tag** — analytics layer + dashboard complete; add git tag once integration test passes
+- **Phase 36**: Live concordance dashboard panel — rolling cross-asset sync visualisation
+- **Phase 36**: Trade dashboard panel — equity curve + fill log from `results/<asset>/live/`
+- **Phase 37**: WebSocket live data — replace yfinance polling with Binance WS feed
+- **Phase 37**: ccxt live orders — swap MockExchange for BinanceTestnetExchange (API keys in env)
+- **Phase 38**: Risk guard — halt trading if drawdown > threshold (uses `DrawdownControlConfig`)
 
 The Notion roadmap and tasks database are the source of truth for sequencing. Update Notion as work progresses.
 

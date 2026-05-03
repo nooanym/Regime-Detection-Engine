@@ -151,6 +151,14 @@ from rde.analysis.reporting import (
     report_to_markdown,
     save_report,
 )
+from rde.analysis.regime_concordance import (
+    ConcordanceConfig,
+    ConcordanceResult,
+    PairwiseConcordance,
+    compute_concordance,
+    concordance_heatmap_data,
+    rolling_concordance_series,
+)
 
 __all__ = [
     # cross-asset
@@ -285,4 +293,11 @@ __all__ = [
     "report_to_json",
     "report_to_markdown",
     "save_report",
+    # Phase 34 — regime concordance
+    "ConcordanceConfig",
+    "ConcordanceResult",
+    "PairwiseConcordance",
+    "compute_concordance",
+    "concordance_heatmap_data",
+    "rolling_concordance_series",
 ]
