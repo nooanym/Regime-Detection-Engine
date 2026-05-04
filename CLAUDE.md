@@ -502,9 +502,21 @@ uv run pytest tests/test_smoke_btc.py
 
 ---
 
-## 9. Current state (as of Phase 36)
+## 9. Current state (as of Phase 36 + post-Phase-36 audit)
 
-**Phases 0–36 are complete on `main`.** 1297 tests passing. The system now includes a full live paper-trading loop with risk guard protection and a complete Streamlit dashboard.
+**Phases 0–36 are complete on `main`, plus the post-Phase-36 audit branch (`audit/post-phase-36-improvements`).** 1297 tests passing. The system now includes a full live paper-trading loop with risk guard protection and a complete Streamlit dashboard.
+
+### Post-Phase-36 audit (branch: `audit/post-phase-36-improvements`)
+
+| Item | Summary | Outcome |
+|------|---------|---------|
+| 2.1 BIC ceiling | Extended n_states [2..10]; n=8 practical optimum via dwell-time criterion | `results/n_states_audit.md`, `docs/findings/2026-05-04_btc_stale_selection.md` |
+| 2.2 Synthetic falsification | Gaussian/Student-t/HSMM recovery tests (`@pytest.mark.slow`) | `tests/integration/test_synthetic_recovery.py` |
+| 2.3 Numerics audit | 100k/250k/500k sequence stress tests; all hmmlearn inference log-space stable | `tests/numerics/test_log_space_stability.py`, `docs/numerics_audit.md` |
+| 2.4 Reproducibility | Golden parquet fixtures; bit-for-bit Viterbi reproducibility enforced | `tests/regression/test_reproducibility.py`, `tests/regression/fixtures/` |
+| 2.5 Notebook check | All 3 notebooks confirmed to use current API; no stale prototypes | No code changes |
+| 2.6 Docstring sweep | Zero mypy errors, zero annotation gaps on 11 Phase 31–36 files | No code changes |
+| 2.7 Notion update | Roadmap, diary, decision log, root status all updated | Notion updated |
 
 ### Completed phases
 
@@ -563,8 +575,10 @@ uv run streamlit run app/streamlit_app.py
 
 ### Picking up from here
 
+- **Regen BTC results**: `uv run rde run --config configs/btc.yaml` — stored results are stale (n=6 vs optimal n=8)
 - **Phase 37**: WebSocket live data — replace yfinance polling with Binance WS feed
 - **Phase 37**: ccxt live orders — swap MockExchange for BinanceTestnetExchange (API keys in env)
+- **Phase 38**: Risk guard auto-halt threshold via `DrawdownControlConfig`
 
 The Notion roadmap and tasks database are the source of truth for sequencing. Update Notion as work progresses.
 

@@ -46,9 +46,13 @@ ignore = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
 
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
     "ruff>=0.15.12",
 ]
