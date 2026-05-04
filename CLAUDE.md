@@ -502,9 +502,9 @@ uv run pytest tests/test_smoke_btc.py
 
 ---
 
-## 9. Current state (as of Phase 35)
+## 9. Current state (as of Phase 36)
 
-**Phases 0–35 are complete on `main`.** 1238 tests passing. The system now includes a full live paper-trading loop connecting the HMM regime engine to a simulated exchange.
+**Phases 0–36 are complete on `main`.** 1297 tests passing. The system now includes a full live paper-trading loop with risk guard protection and a complete Streamlit dashboard.
 
 ### Completed phases
 
@@ -537,6 +537,7 @@ uv run pytest tests/test_smoke_btc.py
 | 33 | `app/streamlit_app.py`, `analysis/cross_asset.py`, `cli.py` | Current State panel; date range filter; `rde compare --daily` for mixed-market alignment |
 | 34 | `trading/` module, `analysis/regime_concordance.py`, `app/panels_live.py`, `configs/` | Paper portfolio, exchange abstraction (MockExchange + BinanceTestnet), regime-change alerting, Live Feed dashboard panel, QQQ/GLD/SOL configs, cross-asset concordance analysis |
 | 35 | `trading/loop.py`, `trade_cmd.py`, `cli.py` | `TradingLoop` (OnlineDecoder → strategy → PaperPortfolio → alerts); `rde trade` CLI with live-polling and `--backtest` replay modes |
+| 36 | `trading/risk_guard.py`, `app/panels_trade.py`, `app/panels_concordance.py` | `RiskGuard` drawdown + daily-loss monitor integrated into `TradingLoop`; Trade History dashboard panel (equity curve, drawdown, fills, per-regime P&L); Regime Concordance panel (sync heatmap, rolling concordance, lead-lag chart) |
 
 ### Full pipeline (paper trading)
 
@@ -562,11 +563,8 @@ uv run streamlit run app/streamlit_app.py
 
 ### Picking up from here
 
-- **Phase 36**: Live concordance dashboard panel — rolling cross-asset sync visualisation
-- **Phase 36**: Trade dashboard panel — equity curve + fill log from `results/<asset>/live/`
 - **Phase 37**: WebSocket live data — replace yfinance polling with Binance WS feed
 - **Phase 37**: ccxt live orders — swap MockExchange for BinanceTestnetExchange (API keys in env)
-- **Phase 38**: Risk guard — halt trading if drawdown > threshold (uses `DrawdownControlConfig`)
 
 The Notion roadmap and tasks database are the source of truth for sequencing. Update Notion as work progresses.
 

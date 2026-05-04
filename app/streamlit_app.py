@@ -163,6 +163,18 @@ try:
 except ImportError:
     _LIVE_PANEL_AVAILABLE = False
 
+try:
+    from panels_trade import _panel_trade_history
+    _TRADE_PANEL_AVAILABLE = True
+except ImportError:
+    _TRADE_PANEL_AVAILABLE = False
+
+try:
+    from panels_concordance import _panel_concordance
+    _CONCORDANCE_PANEL_AVAILABLE = True
+except ImportError:
+    _CONCORDANCE_PANEL_AVAILABLE = False
+
 # ---------------------------------------------------------------------------
 # Panel builders
 # ---------------------------------------------------------------------------
@@ -733,6 +745,9 @@ def main() -> None:
             "Cointegration",
             "Portfolio Optimisation",
             "Full Analysis Report",
+            # Phase 36 — paper-trading + concordance
+            "Trade History",
+            "Regime Concordance",
         ]
         selected_panels = st.multiselect(
             "Panels to display",
@@ -918,6 +933,20 @@ def main() -> None:
             _panel_analysis_markdown(RESULTS_DIR / asset)
         else:
             st.warning("panels_analysis.py not found.")
+
+    if "Trade History" in selected_panels:
+        st.markdown("---")
+        if _TRADE_PANEL_AVAILABLE:
+            _panel_trade_history(asset, RESULTS_DIR / asset)
+        else:
+            st.warning("panels_trade.py not found — refresh.")
+
+    if "Regime Concordance" in selected_panels:
+        st.markdown("---")
+        if _CONCORDANCE_PANEL_AVAILABLE:
+            _panel_concordance(RESULTS_DIR / "comparison")
+        else:
+            st.warning("panels_concordance.py not found.")
 
     # ------------------------------------------------------------------
     # Raw diagnostics expander
