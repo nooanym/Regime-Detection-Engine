@@ -550,6 +550,11 @@ uv run pytest tests/test_smoke_btc.py
 | 34 | `trading/` module, `analysis/regime_concordance.py`, `app/panels_live.py`, `configs/` | Paper portfolio, exchange abstraction (MockExchange + BinanceTestnet), regime-change alerting, Live Feed dashboard panel, QQQ/GLD/SOL configs, cross-asset concordance analysis |
 | 35 | `trading/loop.py`, `trade_cmd.py`, `cli.py` | `TradingLoop` (OnlineDecoder → strategy → PaperPortfolio → alerts); `rde trade` CLI with live-polling and `--backtest` replay modes |
 | 36 | `trading/risk_guard.py`, `app/panels_trade.py`, `app/panels_concordance.py` | `RiskGuard` drawdown + daily-loss monitor integrated into `TradingLoop`; Trade History dashboard panel (equity curve, drawdown, fills, per-regime P&L); Regime Concordance panel (sync heatmap, rolling concordance, lead-lag chart) |
+| 37.1 | `evaluation/purged_cv.py` | Purged k-fold CV + combinatorial purged CV with embargo (de Prado AFML ch. 7); causal OnlineDecoder; FoldResult; parquet output |
+| 37.2 | `evaluation/skeptics.py` | Skeptic's kit: random baseline, shuffle test, feature ablation, period robustness, cost sensitivity sweep, slippage stress; `skeptics_report.md` |
+| 37.3 | `evaluation/baselines.py` | Proper baselines: B&H, vol-targeted B&H, naive momentum, naive vol-regime, 2-state HMM; `compare_model_to_baselines` |
+| 37.4 | `evaluation/feature_importance.py` | Permutation feature importance per CV fold; fold-stability scoring (positive-fold fraction ≥ 0.7); `FeatureImportanceResult` |
+| 37.5 | `evaluation/honest_tearsheet.py` | Honest tearsheet: Sharpe distribution, MDD distribution, worst-5% fold, cost break-even, capacity estimate, failure modes, baseline comparison; `honest_tearsheet.md` |
 
 ### Full pipeline (paper trading)
 
@@ -573,12 +578,26 @@ uv run rde trade --model results/BTC-USD/model.pkl --config configs/btc.yaml
 uv run streamlit run app/streamlit_app.py
 ```
 
+### Phase 37 validation pipeline
+
+```bash
+# Run full Phase 37.1-37.5 validation on BTC
+uv run python scripts/run_phase37_validation.py --config configs/btc.yaml \
+    --n-states 8 --train-bars 4000 --test-bars 500 --n-restarts 3
+
+# Outputs:
+#   results/BTC-USD/purged_cv_{date}.parquet
+#   results/BTC-USD/combinatorial_cv_{date}.parquet
+#   results/BTC-USD/skeptics_report.md       ← adversarial tests pass/fail
+#   results/BTC-USD/honest_tearsheet.md      ← STOP and read this before Phase 38
+```
+
 ### Picking up from here
 
+- **STOP at Phase 37**: Run the validation script, read `honest_tearsheet.md`, then decide on Phase 38
+- **Phase 38 (conditional)**: Research/runtime repo split, live data adapter, deterministic online loop
+- **Phase 39 (conditional)**: Trading212 demo paper-trading harness
 - **Regen BTC results**: `uv run rde run --config configs/btc.yaml` — stored results are stale (n=6 vs optimal n=8)
-- **Phase 37**: WebSocket live data — replace yfinance polling with Binance WS feed
-- **Phase 37**: ccxt live orders — swap MockExchange for BinanceTestnetExchange (API keys in env)
-- **Phase 38**: Risk guard auto-halt threshold via `DrawdownControlConfig`
 
 The Notion roadmap and tasks database are the source of truth for sequencing. Update Notion as work progresses.
 
