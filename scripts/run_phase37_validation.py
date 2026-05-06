@@ -57,12 +57,24 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+_TRANSFORMER_MAP = {
+    "LogReturns": lambda params: LogReturns(),
+    "RollingVolatility": lambda params: RollingVolatility(window=int(params.get("window", 24))),
+    "SmoothedReturns": lambda params: SmoothedReturns(window=int(params.get("window", 12))),
+}
+
+
 def _load_features(
     config_path: Path,
     n_states: int,
     n_restarts: int,
 ) -> tuple[pd.DataFrame, list[str], str, Path]:
-    """Load config, fetch data, build features, return (df, feature_cols, asset, results_dir)."""
+    """Load config, fetch data, build features, return (df, feature_cols, asset, results_dir).
+
+    The feature pipeline is built directly from the config so the validation
+    script works correctly for both hourly and daily configs without
+    hardcoded column names.
+    """
     cfg = load_config(config_path)
     symbol = cfg.asset.symbol
 
@@ -73,14 +85,21 @@ def _load_features(
     source = YFinanceSource(cache_dir=cache_dir)
     raw = source.load(symbol, cfg.asset.period, cfg.asset.interval)
 
-    pipeline = FeaturePipeline([
-        LogReturns(),
-        RollingVolatility(window=24),
-        SmoothedReturns(window=12),
-    ])
+    transformers = []
+    for fc in cfg.features:
+        builder = _TRANSFORMER_MAP.get(fc.name)
+        if builder is None:
+            raise ValueError(
+                f"Unknown feature transformer {fc.name!r}. "
+                f"Add it to _TRANSFORMER_MAP in {__file__}."
+            )
+        transformers.append(builder(fc.params))
+
+    pipeline = FeaturePipeline(transformers)
     df = pipeline.transform(raw)
 
-    feature_cols = ["log_return", "volatility_w24", "smoothed_return_w12"]
+    # Derive column names from pipeline — works for any window sizes.
+    feature_cols = pipeline.output_columns
     return df, feature_cols, symbol, results_dir
 
 
@@ -118,12 +137,21 @@ def main() -> None:
     parser.add_argument("--n-restarts", type=int, default=3, help="HMM restart count (default 3)")
     parser.add_argument("--n-sims", type=int, default=100, help="Null simulation count (default 100)")
     parser.add_argument("--n-permutations", type=int, default=10, help="Permutation count per fold feature (default 10)")
+    parser.add_argument(
+        "--ann-factor", type=int, default=8760,
+        help="Bars per year for annualisation (default 8760 for hourly; use 252 for daily)",
+    )
+    parser.add_argument(
+        "--daily-volume-usd", type=float, default=20_000_000_000.0,
+        help="Asset daily trading volume in USD for capacity estimate (default 20B for BTC)",
+    )
     args = parser.parse_args()
 
     logger.info("=== Phase 37 Validation starting ===")
     logger.info("Config: %s", args.config)
-    logger.info("n_states=%d train_bars=%d test_bars=%d embargo=%d n_restarts=%d",
-                args.n_states, args.train_bars, args.test_bars, args.embargo_bars, args.n_restarts)
+    logger.info("n_states=%d train_bars=%d test_bars=%d embargo=%d n_restarts=%d ann_factor=%d",
+                args.n_states, args.train_bars, args.test_bars, args.embargo_bars, args.n_restarts,
+                args.ann_factor)
 
     # --- 1. Load features ---
     df, feature_cols, symbol, results_dir = _load_features(args.config, args.n_states, args.n_restarts)
@@ -138,9 +166,9 @@ def main() -> None:
 
     from rde.analysis.backtest import backtest_tearsheet, run_backtest
     from rde.evaluation.purged_cv import _default_strategy_config
-    strategy_full = _default_strategy_config(fitted_full, 8760, 0.0001)
+    strategy_full = _default_strategy_config(fitted_full, args.ann_factor, 0.0001)
     bt_full = run_backtest(df["log_return"], regimes_full, strategy_full)
-    ts_full = backtest_tearsheet(bt_full, ann_factor=8760)
+    ts_full = backtest_tearsheet(bt_full, ann_factor=args.ann_factor)
     model_sharpe_full = float(ts_full["sharpe"])
     logger.info("Full-dataset model Sharpe=%.3f", model_sharpe_full)
 
@@ -151,7 +179,7 @@ def main() -> None:
         train_bars=args.train_bars,
         test_bars=args.test_bars,
         embargo_bars=args.embargo_bars,
-        ann_factor=8760,
+        ann_factor=args.ann_factor,
         transaction_cost=0.0001,
         train_kwargs=train_kwargs,
         results_dir=results_dir,
@@ -171,7 +199,7 @@ def main() -> None:
         df, feature_cols, "log_return", args.n_states,
         n_groups=6, n_test_groups=2,
         embargo_bars=args.embargo_bars,
-        ann_factor=8760,
+        ann_factor=args.ann_factor,
         transaction_cost=0.0001,
         train_kwargs=train_kwargs,
         results_dir=results_dir,
@@ -185,7 +213,7 @@ def main() -> None:
         df, feature_cols, "log_return", args.n_states,
         model_sharpe=model_sharpe_full,
         regimes=regimes_full,
-        ann_factor=8760,
+        ann_factor=args.ann_factor,
         n_sims=args.n_sims,
         transaction_cost=0.0001,
         train_kwargs=train_kwargs,
@@ -198,7 +226,7 @@ def main() -> None:
     logger.info("Running baselines…")
     baselines = run_all_baselines(
         df, feature_cols, "log_return",
-        ann_factor=8760,
+        ann_factor=args.ann_factor,
         transaction_cost=0.0001,
         train_kwargs=train_kwargs,
     )
@@ -213,7 +241,7 @@ def main() -> None:
         test_bars=args.test_bars,
         embargo_bars=args.embargo_bars,
         n_permutations=args.n_permutations,
-        ann_factor=8760,
+        ann_factor=args.ann_factor,
         transaction_cost=0.0001,
         train_kwargs=train_kwargs,
         seed=42,
@@ -231,7 +259,7 @@ def main() -> None:
     logger.info("Computing honest tearsheet…")
     tearsheet = compute_honest_tearsheet(
         fold_results, baselines, skeptics, importance,
-        daily_volume_usd=20_000_000_000.0,
+        daily_volume_usd=args.daily_volume_usd,
         asset=symbol,
     )
     tearsheet_path = write_honest_tearsheet(

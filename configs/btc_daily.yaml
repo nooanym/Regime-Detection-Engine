@@ -1,0 +1,53 @@
+# BTC-USD daily bar configuration — Phase 41 daily-frequency probe.
+#
+# Full available history via yfinance period="max", interval="1d".
+# BTC-USD daily data goes back to 2014-09-17 on Yahoo Finance,
+# giving ~4 000 bars of history as of 2026-05-06 (vs ~17 520 hourly bars
+# in the Phase 37 run). This longer sample is the key advantage at daily
+# frequency: more regimes seen, better BIC selection, more CV folds.
+#
+# Feature windows are rescaled from the hourly config:
+#   hourly vol_w24  → daily vol_w20 (≈1 trading month)
+#   hourly vol_w24  → daily vol_w60 (≈1 quarter, optional second feature)
+#   hourly smooth_w12 → daily smooth_w5 (1 trading week)
+# Log returns are unchanged.
+#
+# ann_factor for daily bars: 252 (trading days per year).
+# Embargo for purged CV: 5 days (vs 24 hours at hourly frequency).
+
+asset:
+  symbol: BTC-USD
+  period: max      # full history; no 730d cap for daily intervals
+  interval: 1d
+
+features:
+  - name: LogReturns
+  - name: RollingVolatility
+    params:
+      window: 20    # ≈1 trading month
+  - name: SmoothedReturns
+    params:
+      window: 5     # ≈1 trading week
+
+model:
+  candidate_states: [2, 3, 4, 5, 6, 7, 8]
+  covariance_type: full
+  n_restarts: 10
+  n_iter: 1000
+  init_strategy: kmeans
+  seed_base: 42
+  emission_dist: gaussian
+
+selection:
+  criterion: bic
+
+run:
+  output_dir: results/BTC-USD-daily/
+
+evaluation:
+  run_stability: false
+  stability_n_runs: 3
+  run_walk_forward: false
+  walk_forward_train_window: 365d
+  walk_forward_recalibration: quarterly
+  walk_forward_n_restarts: 3
