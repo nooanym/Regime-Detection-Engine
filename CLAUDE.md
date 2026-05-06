@@ -555,6 +555,7 @@ uv run pytest tests/test_smoke_btc.py
 | 37.3 | `evaluation/baselines.py` | Proper baselines: B&H, vol-targeted B&H, naive momentum, naive vol-regime, 2-state HMM; `compare_model_to_baselines` |
 | 37.4 | `evaluation/feature_importance.py` | Permutation feature importance per CV fold; fold-stability scoring (positive-fold fraction ≥ 0.7); `FeatureImportanceResult` |
 | 37.5 | `evaluation/honest_tearsheet.py` | Honest tearsheet: Sharpe distribution, MDD distribution, worst-5% fold, cost break-even, capacity estimate, failure modes, baseline comparison; `honest_tearsheet.md` |
+| 37b | `research/strategies/vol_target_overlay.py`, `docs/findings/` | Half-dataset stability diagnostic (inter-half ARI=0.742); vol-target overlay Track B (FAIL: -0.155 Sharpe improvement, 294 trades/year); negative result writeup; **research COMPLETE, tagged `v2.1-final-research`** |
 
 ### Full pipeline (paper trading)
 
@@ -592,12 +593,27 @@ uv run python scripts/run_phase37_validation.py --config configs/btc.yaml \
 #   results/BTC-USD/honest_tearsheet.md      ← STOP and read this before Phase 38
 ```
 
+### Phase 37b outcome (2026-05-05)
+
+**RESEARCH COMPLETE — `v2.1-final-research`**
+
+Phase 37b ran the stability diagnostic and attempted a vol-target overlay strategy (Track B). Both the directional signal and the overlay fail the 5 bps cost break-even required for Trading212 deployment. The research has been archived with a full negative result writeup.
+
+Key findings:
+- **Regime structure IS stable** (inter-half ARI = 0.742) — non-stationarity is NOT the cause of failure.
+- **Track B overlay fails**: Sharpe improvement = -0.155, 294 trades/year (need < 20). Root cause: 8-state posterior label permutation within the 24-bar averaging window causes continuous exposure oscillation despite instantaneous confidence of 0.945.
+- **The edge is real but not deployable**: shuffle/random-baseline margins > 1.6 confirm real temporal structure; cost threshold is the binding constraint.
+- Full writeup: `docs/findings/negative_result_writeup.md`, `docs/findings/track_b_decision_memo.md`
+
 ### Picking up from here
 
-- **STOP at Phase 37**: Run the validation script, read `honest_tearsheet.md`, then decide on Phase 38
-- **Phase 38 (conditional)**: Research/runtime repo split, live data adapter, deterministic online loop
-- **Phase 39 (conditional)**: Trading212 demo paper-trading harness
-- **Regen BTC results**: `uv run rde run --config configs/btc.yaml` — stored results are stale (n=6 vs optimal n=8)
+**Research is complete and tagged `v2.1-final-research`.** The regime engine is a valid research tool but not a deployable trading signal at 5 bps execution costs.
+
+**Legitimate next directions (require user decision):**
+1. **Daily-bar resampling** — 2–3 state model at daily resolution reduces turnover; loses hourly statistical power.
+2. **Regime-conditional portfolio allocation** — use regime labels for multi-asset weighting, not directional BTC exposure; edge is in diversification.
+3. **Options / vol forecasting** — regime labels as an implied-vol forecast input, not a delta-1 signal.
+4. **Lower-cost venue adaptation** — DeFi perps with fee rebates may clear a 1–2 bps threshold.
 
 The Notion roadmap and tasks database are the source of truth for sequencing. Update Notion as work progresses.
 
