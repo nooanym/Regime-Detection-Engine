@@ -433,15 +433,21 @@ def run_period_robustness(
     (measuring label stability) and Frobenius dispersion of aligned transition
     matrices (measuring parameter stability).
 
+    If ``window_bars`` exceeds the dataset length the values are automatically
+    scaled to ``n // 3`` and ``n // 6`` respectively so the probe always fits
+    at least 3 windows. This allows the same function to work at both hourly
+    and daily frequency without parameter changes.
+
     Parameters
     ----------
     df_features : pd.DataFrame
     feature_cols : list[str]
     n_states : int
     window_bars : int
-        Window length (default ~6 months of hourly data).
+        Window length (default 4383 ≈ 6 months of hourly data; auto-scaled
+        for shorter datasets).
     step_bars : int
-        Step between windows (default ~1 month).
+        Step between windows (default 730 ≈ 1 month hourly; auto-scaled).
     train_kwargs : dict | None
 
     Returns
@@ -457,11 +463,21 @@ def run_period_robustness(
     X_all = df_features[feature_cols].values
     n = len(X_all)
 
-    # Fixed reference window: 720 bars centred in the dataset.
+    # Auto-scale windows when the requested window_bars exceeds the dataset.
+    if window_bars >= n:
+        window_bars = max(n // 3, n_states * 20)  # need at least 20 obs per state
+        step_bars = max(window_bars // 4, 1)
+        logger.info(
+            "Period robustness: auto-scaled window_bars=%d step_bars=%d "
+            "(dataset n=%d)",
+            window_bars, step_bars, n,
+        )
+
+    # Fixed reference window: centred slice of width min(window_bars, n).
     # Every model decodes the SAME observations so ARI compares assignments
     # on identical data — the only valid basis for a stability measurement.
     ref_centre = n // 2
-    ref_half = 360
+    ref_half = min(window_bars, n) // 2
     ref_start = max(0, ref_centre - ref_half)
     ref_end = min(n, ref_centre + ref_half)
     X_ref = X_all[ref_start:ref_end]
@@ -633,6 +649,8 @@ def run_full_skeptics_kit(
     transaction_cost: float = 0.0001,
     train_kwargs: dict | None = None,
     seed: int = 42,
+    period_robustness_window_bars: int = 4383,
+    period_robustness_step_bars: int = 730,
 ) -> SkepticsReport:
     """Orchestrate all skeptic's tests and return a :class:`SkepticsReport`.
 
@@ -688,7 +706,10 @@ def run_full_skeptics_kit(
         train_kwargs=train_kwargs,
     )
     period_robustness = run_period_robustness(
-        df_features, feature_cols, n_states, train_kwargs=train_kwargs,
+        df_features, feature_cols, n_states,
+        window_bars=period_robustness_window_bars,
+        step_bars=period_robustness_step_bars,
+        train_kwargs=train_kwargs,
     )
     cost_sensitivity = run_cost_sensitivity(
         returns, regimes, strategy_config, ann_factor=ann_factor,

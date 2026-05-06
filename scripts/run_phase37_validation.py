@@ -145,6 +145,21 @@ def main() -> None:
         "--daily-volume-usd", type=float, default=20_000_000_000.0,
         help="Asset daily trading volume in USD for capacity estimate (default 20B for BTC)",
     )
+    parser.add_argument(
+        "--period-robustness-window-bars", type=int, default=4383,
+        help=(
+            "Period robustness window length in bars "
+            "(default 4383 ≈ 6mo hourly; use ~504 for 24mo daily). "
+            "Auto-scaled if larger than dataset."
+        ),
+    )
+    parser.add_argument(
+        "--period-robustness-step-bars", type=int, default=730,
+        help=(
+            "Period robustness step between windows "
+            "(default 730 ≈ 1mo hourly; use ~126 for 6mo daily)."
+        ),
+    )
     args = parser.parse_args()
 
     logger.info("=== Phase 37 Validation starting ===")
@@ -218,6 +233,8 @@ def main() -> None:
         transaction_cost=0.0001,
         train_kwargs=train_kwargs,
         seed=42,
+        period_robustness_window_bars=args.period_robustness_window_bars,
+        period_robustness_step_bars=args.period_robustness_step_bars,
     )
     skeptics_path = write_skeptics_report(skeptics, results_dir, symbol)
     logger.info("Skeptics report → %s", skeptics_path)

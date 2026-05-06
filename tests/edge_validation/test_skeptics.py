@@ -219,16 +219,17 @@ class TestRunPeriodRobustness:
         )
         assert -1.0 <= result.ari_mean <= 1.0
 
-    def test_insufficient_data_returns_degenerate(self):
+    def test_auto_scales_when_window_bars_exceeds_dataset(self):
+        # When window_bars >= n, the function auto-scales and fits windows successfully.
         df = _synthetic_df(500)
         result = run_period_robustness(
             df, FEATURE_COLS, n_states=2,
-            window_bars=800,  # larger than df
+            window_bars=800,  # larger than df → auto-scaled
             step_bars=200,
             train_kwargs=FAST_TRAIN_KWARGS,
         )
-        assert result.n_windows < 2
-        assert not result.is_stable
+        # Auto-scaling should produce at least 2 valid windows
+        assert result.n_windows >= 2
 
 
 # ---------------------------------------------------------------------------
