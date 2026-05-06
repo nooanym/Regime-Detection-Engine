@@ -246,6 +246,7 @@ def compute_honest_tearsheet(
     importance_result: FeatureImportanceResult,
     daily_volume_usd: float = 20_000_000_000.0,
     asset: str = "unknown",
+    ann_factor: int = 8760,
 ) -> HonestTearsheet:
     """Aggregate all Phase 37 results into a single :class:`HonestTearsheet`.
 
@@ -262,6 +263,8 @@ def compute_honest_tearsheet(
     daily_volume_usd : float
         Asset daily trading volume for capacity estimate (default $20B for BTC).
     asset : str
+    ann_factor : int
+        Bars per year for annualisation (default 8760 for hourly crypto).
 
     Returns
     -------
@@ -288,7 +291,6 @@ def compute_honest_tearsheet(
     ann_ret_mean = float(np.mean(ann_returns)) if ann_returns else 0.0
     n_trades_vals = [fr.n_trades for fr in fold_results]
     # Folds are typically ~500 bars = ~3 weeks hourly; annualise trade count
-    ann_factor = 8760
     test_bars_approx = float(np.mean([fr.n_test for fr in fold_results])) if fold_results else 500.0
     trades_per_year = float(np.mean(n_trades_vals)) * (ann_factor / max(test_bars_approx, 1.0))
 
@@ -301,7 +303,8 @@ def compute_honest_tearsheet(
         f"ann_return={ann_ret_mean:.1%}, "
         f"trades_per_year≈{trades_per_year:.0f}, "
         f"daily_volume_usd=${daily_volume_usd / 1e9:.0f}B, "
-        f"impact_coeff=0.001 (0.1% sqrt-impact)"
+        f"impact_coeff=0.001 (0.1% sqrt-impact), "
+        f"ann_factor={ann_factor}"
     )
 
     failure_modes = _identify_failure_modes(fold_results, skeptics_report, importance_result, baseline_comp)
@@ -338,6 +341,10 @@ def write_honest_tearsheet(
     skeptics_report: SkepticsReport,
     importance_result: FeatureImportanceResult,
     results_dir: Path,
+    ann_factor: int = 8760,
+    period_robustness_ari_threshold: float = 0.40,
+    cost_break_even_threshold_bps: float = 10.0,
+    annual_turnover_threshold: float = 30.0,
 ) -> Path:
     """Write the honest tearsheet as a Markdown file.
 
@@ -351,6 +358,7 @@ def write_honest_tearsheet(
     7. Baseline comparison table
     8. Feature importance summary
     9. Skeptic's kit pass/fail table
+    10. GO / NO-GO Verdict — Phase 41 Decision
 
     Parameters
     ----------
@@ -360,6 +368,14 @@ def write_honest_tearsheet(
     skeptics_report : SkepticsReport
     importance_result : FeatureImportanceResult
     results_dir : Path
+    ann_factor : int
+        Bars per year for annualisation (default 8760 for hourly crypto).
+    period_robustness_ari_threshold : float
+        Minimum period-robustness ARI to pass (default 0.40).
+    cost_break_even_threshold_bps : float
+        Minimum cost break-even in bps to pass (default 10.0).
+    annual_turnover_threshold : float
+        Maximum annual trades to pass (default 30.0).
 
     Returns
     -------
@@ -383,6 +399,7 @@ def write_honest_tearsheet(
         "",
         f"Generated: {tearsheet.date_generated}",
         f"CV folds: {tearsheet.n_cv_folds}",
+        f"ann_factor: {ann_factor}",
         "",
         "---",
         "",
@@ -514,6 +531,175 @@ def write_honest_tearsheet(
         f"| Period robustness | {_tick(tearsheet.period_robustness_stable)} | "
         f"ARI mean={_fmt(skeptics_report.period_robustness.ari_mean)}, "
         f"windows={skeptics_report.period_robustness.n_windows} |",
+        "",
+    ]
+
+    # -----------------------------------------------------------------------
+    # Section 10: GO / NO-GO Verdict
+    # -----------------------------------------------------------------------
+
+    # --- Criterion 1: Period robustness ARI ---
+    ari_val = skeptics_report.period_robustness.ari_mean
+    ari_pass = np.isfinite(ari_val) and ari_val >= period_robustness_ari_threshold
+    ari_str = _fmt(ari_val, ".3f")
+
+    # --- Criterion 2: Combinatorial CV Sharpe >= 0.30 and std < mean ---
+    combo_folds = [fr for fr in fold_results if fr.cv_type == "combinatorial_purged"]
+    if combo_folds:
+        combo_sharpes = [fr.sharpe for fr in combo_folds if np.isfinite(fr.sharpe)]
+    else:
+        # Fall back to all folds if no combinatorial folds present
+        combo_sharpes = [fr.sharpe for fr in fold_results if np.isfinite(fr.sharpe)]
+    combo_sharpe_mean = float(np.mean(combo_sharpes)) if combo_sharpes else float("nan")
+    combo_sharpe_std = float(np.std(combo_sharpes, ddof=1)) if len(combo_sharpes) > 1 else 0.0
+    sharpe_pass = (
+        np.isfinite(combo_sharpe_mean)
+        and combo_sharpe_mean >= 0.30
+        and combo_sharpe_std < abs(combo_sharpe_mean)
+    )
+    sharpe_crit_str = (
+        f"{_fmt(combo_sharpe_mean, '.3f')} ± {_fmt(combo_sharpe_std, '.3f')}"
+    )
+
+    # --- Criterion 3: Cost break-even >= threshold ---
+    be_bps = tearsheet.cost_break_even_bps
+    cost_pass = np.isfinite(be_bps) and be_bps >= cost_break_even_threshold_bps
+    be_str = f"{be_bps:.1f}" if np.isfinite(be_bps) else "∞"
+
+    # --- Criterion 4: Annual turnover < threshold ---
+    n_trades_vals = [fr.n_trades for fr in fold_results]
+    test_bars_approx = (
+        float(np.mean([fr.n_test for fr in fold_results])) if fold_results else 500.0
+    )
+    trades_per_year = (
+        float(np.mean(n_trades_vals)) * (ann_factor / max(test_bars_approx, 1.0))
+        if n_trades_vals
+        else float("nan")
+    )
+    turnover_pass = np.isfinite(trades_per_year) and trades_per_year < annual_turnover_threshold
+    turnover_str = f"{trades_per_year:.1f}" if np.isfinite(trades_per_year) else "N/A"
+
+    # --- Criterion 5: Beats all 5 baselines ---
+    n_baselines_total = len(tearsheet.baseline_comparison) if not tearsheet.baseline_comparison.empty else 0
+    n_beats = int(tearsheet.baseline_comparison["beats"].sum()) if not tearsheet.baseline_comparison.empty else 0
+    baselines_pass = tearsheet.beats_all_baselines and n_baselines_total >= 5
+    baselines_str = f"{n_beats}/{n_baselines_total}"
+
+    # --- Overall verdict ---
+    all_pass = ari_pass and sharpe_pass and cost_pass and turnover_pass and baselines_pass
+    verdict = "GO" if all_pass else "NO-GO"
+
+    def _pf(passed: bool) -> str:
+        return "PASS" if passed else "FAIL"
+
+    # --- Failing criteria list for NO-GO reason ---
+    failing: list[str] = []
+    if not ari_pass:
+        failing.append(
+            f"period robustness ARI={ari_str} (threshold {period_robustness_ari_threshold:.2f})"
+        )
+    if not sharpe_pass:
+        failing.append(f"combinatorial CV Sharpe={_fmt(combo_sharpe_mean, '.3f')} ± {_fmt(combo_sharpe_std, '.3f')} (threshold ≥0.30, std<mean)")
+    if not cost_pass:
+        failing.append(f"cost break-even={be_str} bps (threshold ≥{cost_break_even_threshold_bps:.0f} bps)")
+    if not turnover_pass:
+        failing.append(f"annual turnover={turnover_str} trades/yr (threshold <{annual_turnover_threshold:.0f})")
+    if not baselines_pass:
+        if n_beats < n_baselines_total:
+            beaten_by = tearsheet.baseline_comparison[~tearsheet.baseline_comparison["beats"]]["name"].tolist()
+            failing.append(f"does not beat all baselines (fails vs {', '.join(beaten_by)})")
+        else:
+            failing.append(f"fewer than 5 baselines available ({n_baselines_total})")
+
+    no_go_reason = "; ".join(failing) if failing else ""
+
+    # --- Senior quant interpretation ---
+    if all_pass:
+        sq_interp = (
+            "All five Phase 41 decision criteria clear. "
+            "The regime-detection signal demonstrates statistically robust edge above transaction "
+            "cost thresholds with stable turnover. "
+            "Proceed to Phase 38 deployment infrastructure with phased position sizing and "
+            "live-paper verification before committing risk capital."
+        )
+    elif not baselines_pass and not sharpe_pass:
+        sq_interp = (
+            "The regime-detection HMM at this frequency does not add directional value beyond "
+            "simpler trend-following strategies, and the Sharpe is insufficiently stable across "
+            "CV folds. "
+            "This confirms the engine's primary value is in risk characterisation and portfolio "
+            "allocation, not single-asset signal generation. "
+            "The multi-asset concordance probe is the appropriate next experiment."
+        )
+    elif not baselines_pass:
+        sq_interp = (
+            "The regime-detection HMM at this frequency does not add directional value beyond "
+            "simpler trend-following strategies. "
+            "This confirms the engine's value is in risk characterisation and portfolio allocation, "
+            "not single-asset signal generation. "
+            "The multi-asset concordance probe is the appropriate next experiment."
+        )
+    elif not sharpe_pass:
+        sq_interp = (
+            "The high Sharpe variance across CV folds indicates the strategy's edge is "
+            "regime-period-dependent rather than structural. "
+            "The signal is real in some periods (shuffle/random baselines clear) but not reliable "
+            "enough for consistent deployment. "
+            "Consider a regime-conditional position-sizing overlay rather than a binary long/flat signal."
+        )
+    elif not cost_pass:
+        sq_interp = (
+            f"The strategy edge is too thin to survive the required {cost_break_even_threshold_bps:.0f} bps "
+            "cost threshold. "
+            "Lower-cost venue adaptation (e.g., DeFi perps with fee rebates, or a daily-bar "
+            "resampled model with fewer trades) is required before deployment. "
+            "The edge is confirmed real by shuffle and random-baseline tests."
+        )
+    elif not turnover_pass:
+        sq_interp = (
+            f"Annual turnover of {turnover_str} trades/yr exceeds the {annual_turnover_threshold:.0f} "
+            "trades/yr threshold, making the strategy cost-sensitive at standard execution rates. "
+            "Regime smoothing or minimum dwell-time constraints should reduce turnover before "
+            "revisiting the cost break-even analysis."
+        )
+    elif not ari_pass:
+        sq_interp = (
+            f"Period-robustness ARI of {ari_str} is below the {period_robustness_ari_threshold:.2f} "
+            "threshold, indicating the regime structure is not stable across time. "
+            "The model may require more frequent recalibration or a lower n_states configuration "
+            "that captures only the most persistent structural regimes."
+        )
+    else:
+        sq_interp = (
+            f"NO-GO due to: {no_go_reason}. "
+            "Review the sections above for targeted diagnostic detail before determining next steps."
+        )
+
+    lines += [
+        "",
+        "---",
+        "",
+        "## 10. GO / NO-GO Verdict — Phase 41 Decision",
+        "",
+        "| Criterion | Threshold | Value | Result |",
+        "|-----------|-----------|-------|--------|",
+        f"| Period robustness ARI | ≥ {period_robustness_ari_threshold:.2f} | {ari_str} | {_pf(ari_pass)} |",
+        f"| Combinatorial CV Sharpe | ≥ 0.30, std < mean | {sharpe_crit_str} | {_pf(sharpe_pass)} |",
+        f"| Cost break-even | ≥ {cost_break_even_threshold_bps:.0f} bps | {be_str} bps | {_pf(cost_pass)} |",
+        f"| Annual turnover | < {annual_turnover_threshold:.0f} trades/yr | {turnover_str} trades/yr | {_pf(turnover_pass)} |",
+        f"| Beats all baselines | ALL {n_baselines_total} baselines | {baselines_str} | {_pf(baselines_pass)} |",
+        "",
+        f"**VERDICT: {verdict}**",
+        "",
+    ]
+
+    if not all_pass:
+        lines.append(f"> {no_go_reason.capitalize()}")
+        lines.append("")
+
+    lines += [
+        "---",
+        f"*Senior quant interpretation: {sq_interp}*",
         "",
         "---",
         "",

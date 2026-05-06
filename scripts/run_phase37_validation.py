@@ -278,9 +278,11 @@ def main() -> None:
         fold_results, baselines, skeptics, importance,
         daily_volume_usd=args.daily_volume_usd,
         asset=symbol,
+        ann_factor=args.ann_factor,
     )
     tearsheet_path = write_honest_tearsheet(
         tearsheet, fold_results, baselines, skeptics, importance, results_dir,
+        ann_factor=args.ann_factor,
     )
     logger.info("Honest tearsheet → %s", tearsheet_path)
 
