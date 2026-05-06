@@ -457,9 +457,18 @@ def run_period_robustness(
     X_all = df_features[feature_cols].values
     n = len(X_all)
 
+    # Fixed reference window: 720 bars centred in the dataset.
+    # Every model decodes the SAME observations so ARI compares assignments
+    # on identical data — the only valid basis for a stability measurement.
+    ref_centre = n // 2
+    ref_half = 360
+    ref_start = max(0, ref_centre - ref_half)
+    ref_end = min(n, ref_centre + ref_half)
+    X_ref = X_all[ref_start:ref_end]
+
     transmats: list[np.ndarray] = []
     means_list: list[np.ndarray] = []
-    sequences: list[np.ndarray] = []
+    ref_sequences: list[np.ndarray] = []  # each model's decoding of X_ref
 
     start = 0
     while start + window_bars <= n:
@@ -471,14 +480,14 @@ def run_period_robustness(
             start += step_bars
             continue
 
-        X_scaled = fitted.scaler.transform(X_win)
-        states = viterbi_decode(fitted.hmm, X_scaled)
         transmats.append(fitted.hmm.transmat_.copy())
         means_list.append(fitted.hmm.means_.copy())
-        sequences.append(states)
+        # Decode the fixed reference window (not the training window)
+        ref_states = viterbi_decode(fitted.hmm, fitted.scaler.transform(X_ref))
+        ref_sequences.append(ref_states)
         start += step_bars
 
-    n_windows = len(sequences)
+    n_windows = len(ref_sequences)
     if n_windows < 2:
         logger.warning("Period robustness: only %d windows fitted, need >= 2.", n_windows)
         return PeriodRobustnessResult(
@@ -489,12 +498,11 @@ def run_period_robustness(
             is_stable=False,
         )
 
-    # Pairwise ARI — only valid for same-length sequences, use min length
+    # Pairwise ARI across all model pairs on the same reference window
     ari_values: list[float] = []
     for i in range(n_windows):
         for j in range(i + 1, n_windows):
-            min_len = min(len(sequences[i]), len(sequences[j]))
-            ari_values.append(float(adjusted_rand_score(sequences[i][:min_len], sequences[j][:min_len])))
+            ari_values.append(float(adjusted_rand_score(ref_sequences[i], ref_sequences[j])))
 
     ari_mean = float(np.mean(ari_values))
 

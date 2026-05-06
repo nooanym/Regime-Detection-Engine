@@ -32,7 +32,7 @@ _repo_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_repo_root / "src"))
 
 from rde.config.loader import load_config
-from rde.data.cache import read_parquet, write_parquet
+from rde.data.cache import read_cache as read_parquet, write_cache as write_parquet
 from rde.data.yfinance_source import YFinanceSource
 from rde.evaluation.baselines import run_all_baselines
 from rde.evaluation.feature_importance import run_permutation_importance
