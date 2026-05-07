@@ -45,3 +45,10 @@ results/cache/*
 
 # Logs
 *.log
+
+# Claude Code local files
+.claude/
+
+# Coverage
+.coverage
+htmlcov/
