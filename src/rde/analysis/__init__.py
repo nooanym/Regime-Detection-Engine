@@ -159,6 +159,14 @@ from rde.analysis.regime_concordance import (
     concordance_heatmap_data,
     rolling_concordance_series,
 )
+from rde.analysis.multi_asset_allocation import (
+    MultiAssetConfig,
+    MultiAssetResult,
+    compare_allocations,
+    equal_weight_baseline,
+    global_min_var_baseline,
+    run_multi_asset_allocation,
+)
 
 __all__ = [
     # cross-asset
@@ -300,4 +308,11 @@ __all__ = [
     "compute_concordance",
     "concordance_heatmap_data",
     "rolling_concordance_series",
+    # Phase 42 — multi-asset regime allocation
+    "MultiAssetConfig",
+    "MultiAssetResult",
+    "run_multi_asset_allocation",
+    "equal_weight_baseline",
+    "global_min_var_baseline",
+    "compare_allocations",
 ]

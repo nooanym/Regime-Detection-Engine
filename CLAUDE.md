@@ -502,7 +502,7 @@ uv run pytest tests/test_smoke_btc.py
 
 ---
 
-## 9. Current state (as of Phase 41)
+## 9. Current state (as of Phase 42)
 
 **Phases 0–36 are complete on `main`, plus the post-Phase-36 audit branch (`audit/post-phase-36-improvements`).** 1297 tests passing. The system now includes a full live paper-trading loop with risk guard protection and a complete Streamlit dashboard.
 
@@ -557,6 +557,7 @@ uv run pytest tests/test_smoke_btc.py
 | 37.5 | `evaluation/honest_tearsheet.py` | Honest tearsheet: Sharpe distribution, MDD distribution, worst-5% fold, cost break-even, capacity estimate, failure modes, baseline comparison; `honest_tearsheet.md` |
 | 37b | `research/strategies/vol_target_overlay.py`, `docs/findings/` | Half-dataset stability diagnostic (inter-half ARI=0.742); vol-target overlay Track B (FAIL: -0.155 Sharpe improvement, 294 trades/year); negative result writeup; **research COMPLETE, tagged `v2.1-final-research`** |
 | 41 | `configs/btc_daily.yaml`, `scripts/run_phase37_validation.py`, `evaluation/honest_tearsheet.py` | Daily-frequency probe: BTC daily n=8, 27 purged folds. NO-GO: period robustness ARI=0.368 (need ≥0.40); beats only 1/5 baselines (loses to naive momentum 0.892). PASS on: combo CV 0.459±0.323, cost break-even=∞, turnover 19.5/yr. See `docs/findings/phase41_daily_decision_memo.md` |
+| 42 | `analysis/multi_asset_allocation.py` | Walk-forward regime-conditional multi-asset MVO: per-asset HMM → posterior-weighted expected returns → joint-cov MVO → optional vol-target overlay; monthly rebalance; `equal_weight_baseline`, `global_min_var_baseline`, `compare_allocations`; 29 tests |
 
 ### Full pipeline (paper trading)
 
@@ -615,7 +616,7 @@ Key findings:
 **Both hourly and daily directional probes are exhausted.** The regime engine identifies real, stable structure but not deployable directional edge on BTC at any tested frequency.
 
 **Confirmed next directions in priority order:**
-1. **Regime-conditional multi-asset portfolio allocation** — use regime labels for portfolio weighting across BTC/ETH/SPY/GLD; edge is in diversification and drawdown control, not direction. Highest-confidence path.
+1. **Run multi-asset backtest on real data** — wire up `run_multi_asset_allocation` with live data (BTC/ETH/SPY/GLD) and run `compare_allocations` vs baselines; use Phase 37 tearsheet criteria to decide if this direction has deployable edge. Framework is built (Phase 42); empirical result needed.
 2. **Options / vol forecasting** — regime labels as an implied-vol forecast input; the engine reliably identifies vol regimes (ARI=0.742 inter-half) which is exactly what a vol model needs.
 3. **n=3 daily model with stability-first selection** — bounded probe: if n=3 daily clears the same skeptic's kit, the directional hypothesis revives; if not, it is definitively exhausted.
 
