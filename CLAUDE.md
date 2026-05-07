@@ -502,9 +502,21 @@ uv run pytest tests/test_smoke_btc.py
 
 ---
 
-## 9. Current state (as of Phase 35)
+## 9. Current state (as of Phase 41)
 
-**Phases 0–35 are complete on `main`.** 1238 tests passing. The system now includes a full live paper-trading loop connecting the HMM regime engine to a simulated exchange.
+**Phases 0–36 are complete on `main`, plus the post-Phase-36 audit branch (`audit/post-phase-36-improvements`).** 1297 tests passing. The system now includes a full live paper-trading loop with risk guard protection and a complete Streamlit dashboard.
+
+### Post-Phase-36 audit (branch: `audit/post-phase-36-improvements`)
+
+| Item | Summary | Outcome |
+|------|---------|---------|
+| 2.1 BIC ceiling | Extended n_states [2..10]; n=8 practical optimum via dwell-time criterion | `results/n_states_audit.md`, `docs/findings/2026-05-04_btc_stale_selection.md` |
+| 2.2 Synthetic falsification | Gaussian/Student-t/HSMM recovery tests (`@pytest.mark.slow`) | `tests/integration/test_synthetic_recovery.py` |
+| 2.3 Numerics audit | 100k/250k/500k sequence stress tests; all hmmlearn inference log-space stable | `tests/numerics/test_log_space_stability.py`, `docs/numerics_audit.md` |
+| 2.4 Reproducibility | Golden parquet fixtures; bit-for-bit Viterbi reproducibility enforced | `tests/regression/test_reproducibility.py`, `tests/regression/fixtures/` |
+| 2.5 Notebook check | All 3 notebooks confirmed to use current API; no stale prototypes | No code changes |
+| 2.6 Docstring sweep | Zero mypy errors, zero annotation gaps on 11 Phase 31–36 files | No code changes |
+| 2.7 Notion update | Roadmap, diary, decision log, root status all updated | Notion updated |
 
 ### Completed phases
 
@@ -537,6 +549,14 @@ uv run pytest tests/test_smoke_btc.py
 | 33 | `app/streamlit_app.py`, `analysis/cross_asset.py`, `cli.py` | Current State panel; date range filter; `rde compare --daily` for mixed-market alignment |
 | 34 | `trading/` module, `analysis/regime_concordance.py`, `app/panels_live.py`, `configs/` | Paper portfolio, exchange abstraction (MockExchange + BinanceTestnet), regime-change alerting, Live Feed dashboard panel, QQQ/GLD/SOL configs, cross-asset concordance analysis |
 | 35 | `trading/loop.py`, `trade_cmd.py`, `cli.py` | `TradingLoop` (OnlineDecoder → strategy → PaperPortfolio → alerts); `rde trade` CLI with live-polling and `--backtest` replay modes |
+| 36 | `trading/risk_guard.py`, `app/panels_trade.py`, `app/panels_concordance.py` | `RiskGuard` drawdown + daily-loss monitor integrated into `TradingLoop`; Trade History dashboard panel (equity curve, drawdown, fills, per-regime P&L); Regime Concordance panel (sync heatmap, rolling concordance, lead-lag chart) |
+| 37.1 | `evaluation/purged_cv.py` | Purged k-fold CV + combinatorial purged CV with embargo (de Prado AFML ch. 7); causal OnlineDecoder; FoldResult; parquet output |
+| 37.2 | `evaluation/skeptics.py` | Skeptic's kit: random baseline, shuffle test, feature ablation, period robustness, cost sensitivity sweep, slippage stress; `skeptics_report.md` |
+| 37.3 | `evaluation/baselines.py` | Proper baselines: B&H, vol-targeted B&H, naive momentum, naive vol-regime, 2-state HMM; `compare_model_to_baselines` |
+| 37.4 | `evaluation/feature_importance.py` | Permutation feature importance per CV fold; fold-stability scoring (positive-fold fraction ≥ 0.7); `FeatureImportanceResult` |
+| 37.5 | `evaluation/honest_tearsheet.py` | Honest tearsheet: Sharpe distribution, MDD distribution, worst-5% fold, cost break-even, capacity estimate, failure modes, baseline comparison; `honest_tearsheet.md` |
+| 37b | `research/strategies/vol_target_overlay.py`, `docs/findings/` | Half-dataset stability diagnostic (inter-half ARI=0.742); vol-target overlay Track B (FAIL: -0.155 Sharpe improvement, 294 trades/year); negative result writeup; **research COMPLETE, tagged `v2.1-final-research`** |
+| 41 | `configs/btc_daily.yaml`, `scripts/run_phase37_validation.py`, `evaluation/honest_tearsheet.py` | Daily-frequency probe: BTC daily n=8, 27 purged folds. NO-GO: period robustness ARI=0.368 (need ≥0.40); beats only 1/5 baselines (loses to naive momentum 0.892). PASS on: combo CV 0.459±0.323, cost break-even=∞, turnover 19.5/yr. See `docs/findings/phase41_daily_decision_memo.md` |
 
 ### Full pipeline (paper trading)
 
@@ -560,13 +580,44 @@ uv run rde trade --model results/BTC-USD/model.pkl --config configs/btc.yaml
 uv run streamlit run app/streamlit_app.py
 ```
 
+### Phase 37 validation pipeline
+
+```bash
+# Run full Phase 37.1-37.5 validation on BTC
+uv run python scripts/run_phase37_validation.py --config configs/btc.yaml \
+    --n-states 8 --train-bars 4000 --test-bars 500 --n-restarts 3
+
+# Outputs:
+#   results/BTC-USD/purged_cv_{date}.parquet
+#   results/BTC-USD/combinatorial_cv_{date}.parquet
+#   results/BTC-USD/skeptics_report.md       ← adversarial tests pass/fail
+#   results/BTC-USD/honest_tearsheet.md      ← STOP and read this before Phase 38
+```
+
+### Phase 37b outcome (2026-05-05)
+
+**RESEARCH COMPLETE — `v2.1-final-research`**
+
+Phase 37b ran the stability diagnostic and attempted a vol-target overlay strategy (Track B). Both the directional signal and the overlay fail the 5 bps cost break-even required for Trading212 deployment. The research has been archived with a full negative result writeup.
+
+Key findings:
+- **Regime structure IS stable** (inter-half ARI = 0.742) — non-stationarity is NOT the cause of failure.
+- **Track B overlay fails**: Sharpe improvement = -0.155, 294 trades/year (need < 20). Root cause: 8-state posterior label permutation within the 24-bar averaging window causes continuous exposure oscillation despite instantaneous confidence of 0.945.
+- **The edge is real but not deployable**: shuffle/random-baseline margins > 1.6 confirm real temporal structure; cost threshold is the binding constraint.
+- Full writeup: `docs/findings/negative_result_writeup.md`, `docs/findings/track_b_decision_memo.md`
+
+### Phase 41 outcome (2026-05-06)
+
+**Daily probe NO-GO.** BTC-USD daily bars, n=8 (BIC-selected), 4,229 bars (2014–2026). Combinatorial CV Sharpe=0.459±0.323 (PASS), turnover=19.5/yr (PASS), cost break-even=∞ (PASS) — but period robustness ARI=0.368 (need ≥0.40, FAIL) and the model beats only 1 of 5 baselines (naive momentum achieves Sharpe=0.892 vs model's 0.437). The binding failure: directional momentum dominates daily BTC, and the 8-state HMM does not capture it. See `docs/findings/phase41_daily_decision_memo.md`.
+
 ### Picking up from here
 
-- **Phase 36**: Live concordance dashboard panel — rolling cross-asset sync visualisation
-- **Phase 36**: Trade dashboard panel — equity curve + fill log from `results/<asset>/live/`
-- **Phase 37**: WebSocket live data — replace yfinance polling with Binance WS feed
-- **Phase 37**: ccxt live orders — swap MockExchange for BinanceTestnetExchange (API keys in env)
-- **Phase 38**: Risk guard — halt trading if drawdown > threshold (uses `DrawdownControlConfig`)
+**Both hourly and daily directional probes are exhausted.** The regime engine identifies real, stable structure but not deployable directional edge on BTC at any tested frequency.
+
+**Confirmed next directions in priority order:**
+1. **Regime-conditional multi-asset portfolio allocation** — use regime labels for portfolio weighting across BTC/ETH/SPY/GLD; edge is in diversification and drawdown control, not direction. Highest-confidence path.
+2. **Options / vol forecasting** — regime labels as an implied-vol forecast input; the engine reliably identifies vol regimes (ARI=0.742 inter-half) which is exactly what a vol model needs.
+3. **n=3 daily model with stability-first selection** — bounded probe: if n=3 daily clears the same skeptic's kit, the directional hypothesis revives; if not, it is definitively exhausted.
 
 The Notion roadmap and tasks database are the source of truth for sequencing. Update Notion as work progresses.
 

@@ -161,6 +161,7 @@ class TradingLoop:
         strategy_rules: list[tuple[int, float]] | None = None,
         alert_config=None,
         regime_labels: dict[int, str] | None = None,
+        risk_guard_config=None,
     ) -> None:
         from rde.inference.online import OnlineDecoder
         from rde.trading.alerts import AlertConfig, AlertChannel, RegimeChangeMonitor
@@ -209,6 +210,11 @@ class TradingLoop:
         # ── Trade log ─────────────────────────────────────────────────────────
         from rde.trading.trade_log import TradeLog
         self.trade_log = TradeLog()
+
+        # ── Risk guard ────────────────────────────────────────────────────────
+        from rde.trading.risk_guard import RiskGuard, RiskGuardConfig
+        _rg_cfg = risk_guard_config if risk_guard_config is not None else RiskGuardConfig()
+        self.risk_guard = RiskGuard(_rg_cfg, initial_equity=config.initial_capital)
 
         # ── State ─────────────────────────────────────────────────────────────
         self._prev_regime: int | None = None
@@ -260,19 +266,26 @@ class TradingLoop:
         # Regime change alert
         self.monitor.update(timestamp, regime, posterior)
 
-        # Trading
+        # Trading — gated by risk guard
         equity = self.portfolio.mark_to_market(price)
-        target_qty = self.strategy.target_quantity(regime, equity, price)
+        trading_permitted = self.risk_guard.update(timestamp, equity)
 
-        if self.strategy.signal_changed(self._prev_regime or regime, regime) or self._prev_regime is None:
-            fill = self.portfolio.execute(timestamp, config.symbol if False else self.config.symbol, target_qty, price)
-            if fill is not None:
-                self.trade_log.append(fill)
-                self.state.n_trades += 1
-                logger.info(
-                    "%s  regime=%d  %s %.4f @ %.2f  equity=%.2f",
-                    timestamp, regime, fill.side, fill.quantity, fill.price, equity,
-                )
+        if trading_permitted:
+            target_qty = self.strategy.target_quantity(regime, equity, price)
+            if self.strategy.signal_changed(self._prev_regime or regime, regime) or self._prev_regime is None:
+                fill = self.portfolio.execute(timestamp, self.config.symbol, target_qty, price)
+                if fill is not None:
+                    self.trade_log.append(fill)
+                    self.state.n_trades += 1
+                    logger.info(
+                        "%s  regime=%d  %s %.4f @ %.2f  equity=%.2f",
+                        timestamp, regime, fill.side, fill.quantity, fill.price, equity,
+                    )
+        else:
+            logger.warning(
+                "%s  RiskGuard HALT — skipping trade  reason=%s",
+                timestamp, self.risk_guard.state.halt_reason,
+            )
 
         self._prev_regime = regime
         equity = self.portfolio.mark_to_market(price)
@@ -286,6 +299,7 @@ class TradingLoop:
             "equity": equity,
             "position": self.portfolio.position,
             "cash": self.portfolio.cash,
+            "risk_halted": not trading_permitted,
         })
 
         self._bars_since_save += 1

@@ -1,4 +1,4 @@
-"""Live trading utilities (Phase 34).
+"""Live trading utilities (Phases 34–36).
 
 Public API
 ----------
@@ -26,6 +26,11 @@ Alerting
   - :class:`AlertConfig` — configuration for :class:`RegimeChangeMonitor`.
   - :class:`AlertChannel` — dispatch targets (LOG, WEBHOOK, CALLBACK).
   - :class:`RegimeChangeAlert` — alert payload.
+
+Risk guard
+  - :class:`RiskGuard` — drawdown and daily-loss monitor; halts trading on breach.
+  - :class:`RiskGuardConfig` — thresholds and cooldown configuration.
+  - :class:`RiskGuardState` — mutable runtime state exposed for inspection.
 """
 
 from rde.trading.paper_portfolio import Fill, PaperPortfolio, PortfolioConfig
@@ -45,6 +50,7 @@ from rde.trading.alerts import (
     RegimeChangeAlert,
     RegimeChangeMonitor,
 )
+from rde.trading.risk_guard import RiskGuard, RiskGuardConfig, RiskGuardState
 
 __all__ = [
     # paper portfolio
@@ -69,4 +75,8 @@ __all__ = [
     "AlertConfig",
     "RegimeChangeAlert",
     "RegimeChangeMonitor",
+    # risk guard
+    "RiskGuard",
+    "RiskGuardConfig",
+    "RiskGuardState",
 ]

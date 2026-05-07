@@ -122,9 +122,10 @@ def load_config(path: Path | str) -> Config:
     # Evaluation (all optional; defaults to disabled)
     eval_raw = raw.get("evaluation", {})
     wf_recal = str(eval_raw.get("walk_forward_recalibration", "monthly"))
-    if wf_recal != "monthly":
+    if wf_recal not in ("monthly", "quarterly", "weekly"):
         raise ValueError(
-            f"walk_forward_recalibration={wf_recal!r} is not supported. Only 'monthly'."
+            f"walk_forward_recalibration={wf_recal!r} is not supported. "
+            "Use 'monthly', 'quarterly', or 'weekly'."
         )
     evaluation = EvaluationConfig(
         run_stability=bool(eval_raw.get("run_stability", False)),
