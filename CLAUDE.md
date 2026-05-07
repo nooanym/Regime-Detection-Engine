@@ -502,7 +502,7 @@ uv run pytest tests/test_smoke_btc.py
 
 ---
 
-## 9. Current state (as of Phase 36 + post-Phase-36 audit)
+## 9. Current state (as of Phase 41)
 
 **Phases 0–36 are complete on `main`, plus the post-Phase-36 audit branch (`audit/post-phase-36-improvements`).** 1297 tests passing. The system now includes a full live paper-trading loop with risk guard protection and a complete Streamlit dashboard.
 
@@ -556,6 +556,7 @@ uv run pytest tests/test_smoke_btc.py
 | 37.4 | `evaluation/feature_importance.py` | Permutation feature importance per CV fold; fold-stability scoring (positive-fold fraction ≥ 0.7); `FeatureImportanceResult` |
 | 37.5 | `evaluation/honest_tearsheet.py` | Honest tearsheet: Sharpe distribution, MDD distribution, worst-5% fold, cost break-even, capacity estimate, failure modes, baseline comparison; `honest_tearsheet.md` |
 | 37b | `research/strategies/vol_target_overlay.py`, `docs/findings/` | Half-dataset stability diagnostic (inter-half ARI=0.742); vol-target overlay Track B (FAIL: -0.155 Sharpe improvement, 294 trades/year); negative result writeup; **research COMPLETE, tagged `v2.1-final-research`** |
+| 41 | `configs/btc_daily.yaml`, `scripts/run_phase37_validation.py`, `evaluation/honest_tearsheet.py` | Daily-frequency probe: BTC daily n=8, 27 purged folds. NO-GO: period robustness ARI=0.368 (need ≥0.40); beats only 1/5 baselines (loses to naive momentum 0.892). PASS on: combo CV 0.459±0.323, cost break-even=∞, turnover 19.5/yr. See `docs/findings/phase41_daily_decision_memo.md` |
 
 ### Full pipeline (paper trading)
 
@@ -605,15 +606,18 @@ Key findings:
 - **The edge is real but not deployable**: shuffle/random-baseline margins > 1.6 confirm real temporal structure; cost threshold is the binding constraint.
 - Full writeup: `docs/findings/negative_result_writeup.md`, `docs/findings/track_b_decision_memo.md`
 
+### Phase 41 outcome (2026-05-06)
+
+**Daily probe NO-GO.** BTC-USD daily bars, n=8 (BIC-selected), 4,229 bars (2014–2026). Combinatorial CV Sharpe=0.459±0.323 (PASS), turnover=19.5/yr (PASS), cost break-even=∞ (PASS) — but period robustness ARI=0.368 (need ≥0.40, FAIL) and the model beats only 1 of 5 baselines (naive momentum achieves Sharpe=0.892 vs model's 0.437). The binding failure: directional momentum dominates daily BTC, and the 8-state HMM does not capture it. See `docs/findings/phase41_daily_decision_memo.md`.
+
 ### Picking up from here
 
-**Research is complete and tagged `v2.1-final-research`.** The regime engine is a valid research tool but not a deployable trading signal at 5 bps execution costs.
+**Both hourly and daily directional probes are exhausted.** The regime engine identifies real, stable structure but not deployable directional edge on BTC at any tested frequency.
 
-**Legitimate next directions (require user decision):**
-1. **Daily-bar resampling** — 2–3 state model at daily resolution reduces turnover; loses hourly statistical power.
-2. **Regime-conditional portfolio allocation** — use regime labels for multi-asset weighting, not directional BTC exposure; edge is in diversification.
-3. **Options / vol forecasting** — regime labels as an implied-vol forecast input, not a delta-1 signal.
-4. **Lower-cost venue adaptation** — DeFi perps with fee rebates may clear a 1–2 bps threshold.
+**Confirmed next directions in priority order:**
+1. **Regime-conditional multi-asset portfolio allocation** — use regime labels for portfolio weighting across BTC/ETH/SPY/GLD; edge is in diversification and drawdown control, not direction. Highest-confidence path.
+2. **Options / vol forecasting** — regime labels as an implied-vol forecast input; the engine reliably identifies vol regimes (ARI=0.742 inter-half) which is exactly what a vol model needs.
+3. **n=3 daily model with stability-first selection** — bounded probe: if n=3 daily clears the same skeptic's kit, the directional hypothesis revives; if not, it is definitively exhausted.
 
 The Notion roadmap and tasks database are the source of truth for sequencing. Update Notion as work progresses.
 

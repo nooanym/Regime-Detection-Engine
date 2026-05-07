@@ -562,8 +562,10 @@ def write_honest_tearsheet(
     )
 
     # --- Criterion 3: Cost break-even >= threshold ---
+    # inf bps means the strategy is profitable across the full cost sweep —
+    # that is a PASS, not a failure.
     be_bps = tearsheet.cost_break_even_bps
-    cost_pass = np.isfinite(be_bps) and be_bps >= cost_break_even_threshold_bps
+    cost_pass = be_bps >= cost_break_even_threshold_bps  # inf >= threshold → True
     be_str = f"{be_bps:.1f}" if np.isfinite(be_bps) else "∞"
 
     # --- Criterion 4: Annual turnover < threshold ---
