@@ -199,16 +199,14 @@ def _posterior_expected_return(
 
         E[r] = sum_k( p_k * mu_k[log_return_idx] )
 
-    where ``mu_k`` is the k-th row of the HMM emission means (scaled space).
-    We unscale back to the original feature space using the model's scaler.
+    where ``mu_k`` is the k-th row of the HMM emission means (original space).
     """
     posteriors = decoder.batch_filter(X_train)  # (T, K)
     last_posterior = posteriors[-1]  # (K,)
 
-    fitted = decoder.fitted
-    # Emission means in original feature space.
-    means_scaled = fitted.hmm.means_  # (K, n_features)
-    means_orig = fitted.scaler.inverse_transform(means_scaled)  # (K, n_features)
+    # OnlineDecoder stores the scaled HMM as _model and its scaler as _scaler.
+    means_scaled = decoder._model.means_  # (K, n_features)
+    means_orig = decoder._scaler.inverse_transform(means_scaled)  # (K, n_features)
     regime_returns = means_orig[:, log_return_idx]  # (K,)
     return float(last_posterior @ regime_returns)
 
