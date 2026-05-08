@@ -329,15 +329,14 @@ def run_multi_asset_allocation(
             )
 
         # --- Vol targeting overlay ---
+        # Scale the entire position down so portfolio vol hits target_vol.
+        # The unallocated fraction goes to cash — do NOT renormalise back
+        # to sum=1 (that would undo the vol scaling entirely).
         if cfg.target_vol is not None:
             weights = _vol_target_scale(
                 weights, cov_joint, cfg.target_vol, cfg.ann_factor
             )
-            # After scaling, re-project onto weight constraints.
-            total = weights.sum()
-            if total > 1e-10:
-                weights = np.clip(weights / total, cfg.min_weight, cfg.max_weight)
-                weights = _box_project(weights, cfg.min_weight, cfg.max_weight, N)
+            weights = np.clip(weights, cfg.min_weight, cfg.max_weight)
 
         # Fill the next rebalance period with these weights.
         end = min(t + cfg.rebalance_bars, T)
