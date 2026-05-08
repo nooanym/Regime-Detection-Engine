@@ -559,6 +559,7 @@ uv run pytest tests/test_smoke_btc.py
 | 41 | `configs/btc_daily.yaml`, `scripts/run_phase37_validation.py`, `evaluation/honest_tearsheet.py` | Daily-frequency probe: BTC daily n=8, 27 purged folds. NO-GO: period robustness ARI=0.368 (need ≥0.40); beats only 1/5 baselines (loses to naive momentum 0.892). PASS on: combo CV 0.459±0.323, cost break-even=∞, turnover 19.5/yr. See `docs/findings/phase41_daily_decision_memo.md` |
 | 42 | `analysis/multi_asset_allocation.py` | Walk-forward regime-conditional multi-asset MVO: per-asset HMM → posterior-weighted expected returns → joint-cov MVO → optional vol-target overlay; monthly rebalance; `equal_weight_baseline`, `global_min_var_baseline`, `compare_allocations`; 29 tests |
 | 42b | `scripts/run_multi_asset_backtest.py`, `docs/findings/phase42_multi_asset_decision_memo.md` | Empirical run BTC/ETH/SPY/GLD daily 2017–2026 (2121 bars). NO-GO: regime_mvo Sharpe=0.450 vs global_min_var=0.937. Regime conditioning adds +0.11 over equal_weight but loses to pure variance minimisation by −0.487 Sharpe. Root cause: mixed crypto+equity portfolio — structural vol difference (BTC 80% vs SPY 15%) dominates any directional tilt from HMM. See `docs/findings/phase42_multi_asset_decision_memo.md` |
+| 42c | `analysis/multi_asset_allocation.py` (`regime_informed_min_var`), `docs/findings/phase42_multi_asset_decision_memo.md` | Regime-informed min-var probe: exclude assets with posterior-weighted E[r] < 0 from eligible min-var set. NO-GO: Sharpe=0.410 vs global_min_var=0.937. MDD=67.4% (same as equal_weight) — regime exclusions do not protect against the large crypto drawdowns that define the gap. Root cause: onset latency (HMM is backward-looking at crash onset), min_eligible fallback retains crypto during bear markets. The entire BTC/ETH/SPY/GLD universe is exhausted. See `docs/findings/phase42_multi_asset_decision_memo.md` |
 
 ### Full pipeline (paper trading)
 
@@ -614,16 +615,27 @@ Key findings:
 
 ### Multi-asset allocation outcome (2026-05-08)
 
-**NO-GO.** BTC/ETH/SPY/GLD daily 2017–2026, regime_mvo Sharpe=0.450 vs global_min_var=0.937. Regime conditioning adds +0.11 Sharpe over equal-weight but loses to pure variance minimisation by −0.487. Root cause: structural vol disparity (BTC ~80%, SPY ~15%) means min-var structurally allocates to low-vol assets regardless of regime. n=3 daily kill-test also NO-GO: Sharpe 0.638±1.647, ARI=0.321, random-baseline p=0.50 (indistinguishable from random). All directional and allocational probes exhausted. See `docs/findings/phase42_multi_asset_decision_memo.md`.
+**NO-GO (all variants).** BTC/ETH/SPY/GLD daily 2017–2026:
+- regime_mvo (no vol-target) Sharpe=0.450 vs global_min_var=0.937 (Phase 42b)
+- regime_informed_min_var Sharpe=0.410 vs global_min_var=0.937 (Phase 42c)
+- MDD for all regime strategies = 67.4% vs global_min_var = 31.9%
+
+Root cause: structural vol disparity (BTC ~80%, SPY ~15%) — min-var structurally
+allocates ~70–80% to low-vol assets, making it impossible for regime conditioning
+to bridge the MDD gap. Regime exclusions do not protect drawdowns because the
+HMM is backward-looking at crash onset. The entire BTC/ETH/SPY/GLD universe is
+exhausted. See `docs/findings/phase42_multi_asset_decision_memo.md`.
 
 ### Picking up from here
 
-**All tested directions are exhausted: single-asset direction (hourly n=8, daily n=8, daily n=3), and multi-asset regime MVO.** The engine reliably finds stable vol/correlation structure but not deployable edge at tested cost constraints.
+**All tested directions in the BTC/ETH universe are exhausted:** single-asset
+direction (hourly n=8, daily n=8, daily n=3), multi-asset MVO, regime-informed
+min-var. The engine reliably finds stable vol/correlation structure but not
+deployable edge at tested cost constraints.
 
 **Confirmed next directions in priority order:**
-1. **Regime-informed min-var** — use regime classification to exclude bad-regime assets from the min-var eligible set (e.g., if BTC is in its two lowest-return regimes, set max_weight=0). Combines structural variance advantage with regime exclusions.
+1. **Options / vol forecasting** — regime labels as implied-vol forecast input; ARI=0.742 confirms stable vol regime structure. Highest-confidence unexplored direction.
 2. **Equity-only universe** — run regime_mvo on SPY/GLD/TLT/IEF where vol differences are smaller; the min-var advantage may shrink enough for regime conditioning to matter.
-3. **Options / vol forecasting** — regime labels as implied-vol forecast input; ARI=0.742 confirms stable vol regime structure.
 
 The Notion roadmap and tasks database are the source of truth for sequencing. Update Notion as work progresses.
 
