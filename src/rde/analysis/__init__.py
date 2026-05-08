@@ -165,6 +165,7 @@ from rde.analysis.multi_asset_allocation import (
     compare_allocations,
     equal_weight_baseline,
     global_min_var_baseline,
+    regime_informed_min_var,
     run_multi_asset_allocation,
 )
 
@@ -312,6 +313,7 @@ __all__ = [
     "MultiAssetConfig",
     "MultiAssetResult",
     "run_multi_asset_allocation",
+    "regime_informed_min_var",
     "equal_weight_baseline",
     "global_min_var_baseline",
     "compare_allocations",

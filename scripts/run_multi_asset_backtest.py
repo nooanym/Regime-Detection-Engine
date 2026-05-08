@@ -37,6 +37,7 @@ from rde.analysis.multi_asset_allocation import (
     compare_allocations,
     equal_weight_baseline,
     global_min_var_baseline,
+    regime_informed_min_var,
     run_multi_asset_allocation,
 )
 from rde.data.yfinance_source import YFinanceSource
@@ -198,32 +199,37 @@ def _write_report(
     run_date : str
         ``YYYYMMDD`` string.
     """
-    # GO/NO-GO verdict: regime_mvo Sharpe must exceed both baselines.
+    # GO/NO-GO verdict:
+    #   regime_informed_min_var must beat global_min_var (structural baseline).
+    #   regime_mvo is shown for reference but is not the primary GO criterion here.
+    rimv_rows = comparison_df[comparison_df["name"] == "regime_informed_min_var"]
     regime_rows = comparison_df[comparison_df["name"] == "regime_mvo"]
     ew_rows = comparison_df[comparison_df["name"] == "equal_weight"]
     mv_rows = comparison_df[comparison_df["name"] == "global_min_var"]
 
+    rimv_sharpe = float(rimv_rows["sharpe"].iloc[0]) if len(rimv_rows) else float("-inf")
     regime_sharpe = float(regime_rows["sharpe"].iloc[0]) if len(regime_rows) else float("-inf")
     ew_sharpe = float(ew_rows["sharpe"].iloc[0]) if len(ew_rows) else float("-inf")
     mv_sharpe = float(mv_rows["sharpe"].iloc[0]) if len(mv_rows) else float("-inf")
-    baseline_max = max(ew_sharpe, mv_sharpe)
 
-    verdict = "PASS" if regime_sharpe > baseline_max else "FAIL"
+    # Primary criterion: regime_informed_min_var > global_min_var.
+    verdict = "PASS" if rimv_sharpe > mv_sharpe else "FAIL"
 
     if verdict == "PASS":
         next_step = (
-            "Regime-conditional MVO clears the baseline bar. "
+            "Regime-informed min-var beats the structural (global_min_var) baseline. "
+            "Regime-based asset exclusion adds value beyond variance reduction alone. "
             "Proceed to Phase 37-style purged CV validation on the multi-asset portfolio "
             "to stress-test regime stability and cost sensitivity before live deployment."
         )
     else:
         next_step = (
-            "Regime-conditional MVO does not beat the best passive baseline. "
-            "Investigate: (1) whether n_states or lookback_bars is misspecified; "
-            "(2) whether any single asset is dragging performance; "
-            "(3) whether the vol-target overlay is distorting weights. "
-            "If no fix is found after targeted probes, file this as a negative result "
-            "and consider the Options/vol-forecasting direction (CLAUDE.md §9)."
+            "Regime-informed min-var does not beat global_min_var. "
+            "Regime-based exclusions do not improve on pure variance minimisation. "
+            "The structural vol advantage of min-var dominates any regime signal. "
+            "This closes the multi-asset direction for the BTC/ETH/SPY/GLD universe. "
+            "Consider the equity-only universe (SPY/GLD/TLT/IEF) or the "
+            "Options/vol-forecasting direction (CLAUDE.md §9)."
         )
 
     # Data summary table.
@@ -277,13 +283,13 @@ def _write_report(
         f"**Verdict: {verdict}**",
         "",
         (
-            f"regime_mvo Sharpe = {regime_sharpe:.3f} "
-            f"vs equal_weight = {ew_sharpe:.3f}, "
-            f"global_min_var = {mv_sharpe:.3f}."
+            f"regime_informed_min_var Sharpe = {rimv_sharpe:.3f} "
+            f"vs global_min_var = {mv_sharpe:.3f} "
+            f"(equal_weight = {ew_sharpe:.3f}, regime_mvo = {regime_sharpe:.3f})."
         ),
         (
-            "PASS criterion: regime_mvo Sharpe must exceed "
-            "max(equal_weight Sharpe, global_min_var Sharpe)."
+            "PASS criterion: regime_informed_min_var Sharpe must exceed "
+            "global_min_var Sharpe (structural baseline)."
         ),
         "",
         "## 5. Next steps",
@@ -434,11 +440,43 @@ def main() -> None:
         mv.sharpe, mv.ann_return, mv.ann_vol, mv.max_drawdown,
     )
 
-    # --- 8. Comparison table ---
+    # --- 8. Regime-informed min-var (Phase 42c probe) ---
+    # Use the same config but always min-var with regime-based asset exclusion.
+    rimv_config = MultiAssetConfig(
+        ann_factor=252,
+        rebalance_bars=21,
+        lookback_bars=args.lookback_bars,
+        cov_window_bars=63,
+        n_states=args.n_states,
+        n_restarts=args.n_restarts,
+        transaction_cost=0.001,
+        target_vol=None,   # no vol target — pure min-var + exclusion
+        mvo_kind="min_var",
+        min_weight=0.0,
+        max_weight=1.0,    # relax max_weight so excluded assets can concentrate
+    )
+    logger.info(
+        "Running regime-informed min-var (exclusion_threshold=0.0)…"
+    )
+    rimv = regime_informed_min_var(
+        asset_returns,
+        feat_dfs_aligned,
+        config=rimv_config,
+        exclusion_threshold=0.0,
+        min_eligible_assets=2,
+    )
+    logger.info(
+        "regime_informed_min_var: Sharpe=%.3f  ann_return=%.3f  ann_vol=%.3f  MDD=%.3f  rebalances=%d",
+        rimv.sharpe, rimv.ann_return, rimv.ann_vol,
+        rimv.max_drawdown, len(rimv.rebalance_dates),
+    )
+
+    # --- 9. Comparison table ---
     comparison_df = compare_allocations({
         "regime_mvo": result,
-        "equal_weight": ew,
+        "regime_informed_min_var": rimv,
         "global_min_var": mv,
+        "equal_weight": ew,
     })
 
     # Print to stdout.
@@ -450,24 +488,28 @@ def main() -> None:
     print(comparison_df.to_string(index=False))
     print("=" * 70)
 
-    # --- 9. Save weights + returns parquet ---
+    # --- 10. Save weights + returns parquet ---
     backtest_path = output_dir / f"backtest_{run_date}.parquet"
     weights_out = result.weights.copy()
     weights_out.columns = [f"weight_{c}" for c in weights_out.columns]
+    rimv_weights_out = rimv.weights.copy()
+    rimv_weights_out.columns = [f"rimv_weight_{c}" for c in rimv_weights_out.columns]
     returns_out = asset_returns.copy()
     returns_out.columns = [f"return_{c}" for c in returns_out.columns]
     port_ret_series = result.portfolio_returns.rename("portfolio_return")
+    rimv_ret_series = rimv.portfolio_returns.rename("rimv_portfolio_return")
     ew_ret_series = ew.portfolio_returns.rename("ew_portfolio_return")
     mv_ret_series = mv.portfolio_returns.rename("mv_portfolio_return")
 
     combined = pd.concat(
-        [weights_out, returns_out, port_ret_series, ew_ret_series, mv_ret_series],
+        [weights_out, rimv_weights_out, returns_out,
+         port_ret_series, rimv_ret_series, ew_ret_series, mv_ret_series],
         axis=1,
     )
     combined.to_parquet(backtest_path)
     logger.info("Weights + returns saved → %s", backtest_path)
 
-    # --- 10. Write Markdown report ---
+    # --- 11. Write Markdown report ---
     report_path = output_dir / f"report_{run_date}.md"
     _write_report(
         report_path=report_path,

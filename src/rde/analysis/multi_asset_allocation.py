@@ -20,6 +20,7 @@ Public API
 MultiAssetConfig
 MultiAssetResult
 run_multi_asset_allocation
+regime_informed_min_var
 equal_weight_baseline
 global_min_var_baseline
 compare_allocations
@@ -356,6 +357,165 @@ def run_multi_asset_allocation(
 
     return MultiAssetResult(
         name="regime_conditional_mvo",
+        weights=weights_df,
+        portfolio_returns=port_ret,
+        equity=equity,
+        asset_returns=asset_returns.copy(),
+        rebalance_dates=rebalance_dates,
+        sharpe=sharpe,
+        calmar=calmar,
+        max_drawdown=mdd,
+        ann_return=ann_ret,
+        ann_vol=ann_vol,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Regime-informed minimum-variance (Phase 42c probe)
+# ---------------------------------------------------------------------------
+
+
+def regime_informed_min_var(
+    asset_returns: pd.DataFrame,
+    asset_features: dict[str, pd.DataFrame],
+    config: MultiAssetConfig | None = None,
+    exclusion_threshold: float = 0.0,
+    min_eligible_assets: int = 2,
+    train_kwargs: dict | None = None,
+) -> MultiAssetResult:
+    """Walk-forward minimum-variance with regime-based asset exclusion.
+
+    At each monthly rebalance, assets whose HMM posterior-weighted expected
+    return falls below ``exclusion_threshold`` are excluded (weight set to
+    zero).  The remaining *eligible* assets receive global-min-var weights
+    estimated from the rolling joint covariance.
+
+    This probes whether regime-conditional exclusions add value on top of
+    the structural variance advantage of global min-var (Sharpe ~0.94 in the
+    Phase 42b backtest with BTC/ETH/SPY/GLD).
+
+    Parameters
+    ----------
+    asset_returns : pd.DataFrame
+        Shape (T, N).  Per-bar log returns.  Must have a DatetimeIndex.
+    asset_features : dict[str, pd.DataFrame]
+        Per-asset feature DataFrames (same index as ``asset_returns``).
+    config : MultiAssetConfig, optional
+        Fields used: ``ann_factor``, ``rebalance_bars``, ``lookback_bars``,
+        ``cov_window_bars``, ``n_states``, ``n_restarts``,
+        ``transaction_cost``, ``min_weight``, ``max_weight``,
+        ``regularisation``, ``log_return_col``.
+        ``mvo_kind`` and ``target_vol`` are ignored (always min-var,
+        no vol target).
+    exclusion_threshold : float
+        Assets with posterior-weighted E[r] below this value are excluded.
+        Default ``0.0`` excludes assets in net-negative-return regimes.
+    min_eligible_assets : int
+        Minimum assets to keep eligible.  If the threshold would exclude
+        more than ``N - min_eligible_assets`` assets, the
+        ``min_eligible_assets`` assets with the highest E[r] are retained.
+    train_kwargs : dict, optional
+        Extra keyword arguments forwarded to :func:`rde.models.hmm.train_hmm`.
+
+    Returns
+    -------
+    MultiAssetResult
+        ``name = "regime_informed_min_var"``
+    """
+    cfg = config or MultiAssetConfig()
+    tkwargs = train_kwargs or {}
+    assets = list(asset_returns.columns)
+    N = len(assets)
+
+    if N < 2:
+        raise ValueError("regime_informed_min_var requires at least 2 assets.")
+    if min_eligible_assets < 2:
+        raise ValueError("min_eligible_assets must be at least 2.")
+
+    aligned_features = {
+        a: asset_features[a].reindex(asset_returns.index).ffill().dropna()
+        for a in assets
+    }
+
+    T = len(asset_returns)
+    weight_arr = np.full((T, N), 1.0 / N)
+    rebalance_dates: list[pd.Timestamp] = []
+
+    for t in range(cfg.lookback_bars, T, cfg.rebalance_bars):
+        train_slice = slice(t - cfg.lookback_bars, t)
+        cov_slice = slice(max(0, t - cfg.cov_window_bars), t)
+
+        # Joint covariance from rolling return window.
+        ret_window = asset_returns.iloc[cov_slice].values.astype(float)
+        if ret_window.shape[0] < max(4, N + 1):
+            continue
+        cov_joint = np.cov(ret_window.T, ddof=1)
+        if cov_joint.ndim == 0:
+            cov_joint = np.array([[float(cov_joint)]])
+        cov_joint += np.eye(N) * cfg.regularisation
+
+        # Posterior-weighted expected return per asset.
+        exp_returns = np.zeros(N)
+        for i, asset in enumerate(assets):
+            feat_df = aligned_features[asset]
+            feat_train = feat_df.iloc[train_slice].values.astype(float)
+            if feat_train.shape[0] < cfg.n_states * 2:
+                continue
+            feat_cols = list(feat_df.columns)
+            lr_idx = (
+                feat_cols.index(cfg.log_return_col)
+                if cfg.log_return_col in feat_cols
+                else 0
+            )
+            try:
+                fitted = train_hmm(
+                    feat_train,
+                    n_states=cfg.n_states,
+                    n_restarts=cfg.n_restarts,
+                    **tkwargs,
+                )
+                decoder = OnlineDecoder(fitted)
+                exp_returns[i] = _posterior_expected_return(decoder, feat_train, lr_idx)
+            except Exception as exc:
+                logger.warning(
+                    "HMM fit failed for %s at bar %d: %s", asset, t, exc
+                )
+
+        # Determine eligible asset set.
+        eligible_mask = exp_returns >= exclusion_threshold
+        if int(eligible_mask.sum()) < min_eligible_assets:
+            # Relax: keep top-min_eligible by expected return.
+            top_idx = np.argsort(exp_returns)[::-1][:min_eligible_assets]
+            eligible_mask = np.zeros(N, dtype=bool)
+            eligible_mask[top_idx] = True
+
+        eligible_idx = np.where(eligible_mask)[0]
+        n_el = len(eligible_idx)
+
+        # Min-var on eligible sub-universe; embed back into full weight vector.
+        if n_el == N:
+            weights = _min_variance_weights(cov_joint, cfg.min_weight, cfg.max_weight)
+        else:
+            cov_sub = cov_joint[np.ix_(eligible_idx, eligible_idx)]
+            sub_w = _min_variance_weights(cov_sub, cfg.min_weight, cfg.max_weight)
+            weights = np.zeros(N)
+            weights[eligible_idx] = sub_w
+
+        end = min(t + cfg.rebalance_bars, T)
+        weight_arr[t:end] = weights[None, :]
+        rebalance_dates.append(asset_returns.index[t])
+
+    weights_df = pd.DataFrame(weight_arr, index=asset_returns.index, columns=assets)
+    port_ret = portfolio_returns(
+        weights_df,
+        asset_returns,
+        transaction_cost_bps=cfg.transaction_cost * 10_000,
+    )
+    equity = (1.0 + port_ret).cumprod()
+    sharpe, calmar, mdd, ann_ret, ann_vol = _compute_metrics(port_ret, cfg.ann_factor)
+
+    return MultiAssetResult(
+        name="regime_informed_min_var",
         weights=weights_df,
         portfolio_returns=port_ret,
         equity=equity,

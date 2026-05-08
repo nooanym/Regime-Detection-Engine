@@ -12,6 +12,7 @@ from rde.analysis.multi_asset_allocation import (
     compare_allocations,
     equal_weight_baseline,
     global_min_var_baseline,
+    regime_informed_min_var,
     run_multi_asset_allocation,
 )
 
@@ -283,3 +284,93 @@ class TestCompareAllocations:
         df = compare_allocations(results)
         for col in ("sharpe", "calmar", "max_drawdown", "ann_return", "ann_vol"):
             assert np.isfinite(df[col].values).all()
+
+
+# ---------------------------------------------------------------------------
+# Regime-informed minimum-variance
+# ---------------------------------------------------------------------------
+
+
+class TestRegimeInformedMinVar:
+    def test_returns_result_type(self) -> None:
+        ret = _make_returns()
+        feats = _make_features(ret)
+        result = regime_informed_min_var(ret, feats, config=_fast_config())
+        assert isinstance(result, MultiAssetResult)
+
+    def test_name(self) -> None:
+        ret = _make_returns()
+        feats = _make_features(ret)
+        result = regime_informed_min_var(ret, feats, config=_fast_config())
+        assert result.name == "regime_informed_min_var"
+
+    def test_weights_shape(self) -> None:
+        ret = _make_returns()
+        feats = _make_features(ret)
+        result = regime_informed_min_var(ret, feats, config=_fast_config())
+        assert result.weights.shape == ret.shape
+
+    def test_weights_long_only(self) -> None:
+        ret = _make_returns()
+        feats = _make_features(ret)
+        result = regime_informed_min_var(ret, feats, config=_fast_config())
+        assert (result.weights.values >= -1e-9).all()
+
+    def test_equity_positive(self) -> None:
+        ret = _make_returns()
+        feats = _make_features(ret)
+        result = regime_informed_min_var(ret, feats, config=_fast_config())
+        assert (result.equity.values > 0.0).all()
+
+    def test_metrics_finite(self) -> None:
+        ret = _make_returns()
+        feats = _make_features(ret)
+        result = regime_informed_min_var(ret, feats, config=_fast_config())
+        for attr in ("sharpe", "calmar", "max_drawdown", "ann_return", "ann_vol"):
+            assert np.isfinite(getattr(result, attr))
+
+    def test_rebalance_dates_populated(self) -> None:
+        ret = _make_returns()
+        feats = _make_features(ret)
+        result = regime_informed_min_var(ret, feats, config=_fast_config())
+        assert len(result.rebalance_dates) >= 1
+
+    def test_requires_at_least_two_assets(self) -> None:
+        ret = _make_returns(N=1)
+        feats = _make_features(ret)
+        with pytest.raises(ValueError, match="at least 2"):
+            regime_informed_min_var(ret, feats, config=_fast_config())
+
+    def test_min_eligible_assets_must_be_two(self) -> None:
+        ret = _make_returns()
+        feats = _make_features(ret)
+        with pytest.raises(ValueError, match="min_eligible_assets"):
+            regime_informed_min_var(ret, feats, config=_fast_config(), min_eligible_assets=1)
+
+    def test_high_threshold_falls_back_to_min_eligible(self) -> None:
+        """With threshold=+inf all assets excluded; min_eligible fallback keeps 2."""
+        ret = _make_returns(N=4)
+        feats = _make_features(ret)
+        cfg = _fast_config()
+        result = regime_informed_min_var(
+            ret, feats, config=cfg, exclusion_threshold=1e6, min_eligible_assets=2
+        )
+        assert isinstance(result, MultiAssetResult)
+        # At every rebalance at least 2 assets have nonzero weight.
+        reb_dates = result.rebalance_dates
+        if reb_dates:
+            for d in reb_dates:
+                w = result.weights.loc[d].values
+                assert (w > 1e-9).sum() >= 2
+
+    def test_four_assets(self) -> None:
+        ret = _make_returns(N=4)
+        feats = _make_features(ret)
+        result = regime_informed_min_var(ret, feats, config=_fast_config())
+        assert result.weights.shape == (len(ret), 4)
+
+    def test_portfolio_returns_length(self) -> None:
+        ret = _make_returns()
+        feats = _make_features(ret)
+        result = regime_informed_min_var(ret, feats, config=_fast_config())
+        assert len(result.portfolio_returns) == len(ret)
