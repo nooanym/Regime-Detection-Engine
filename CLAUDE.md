@@ -561,6 +561,8 @@ uv run pytest tests/test_smoke_btc.py
 | 42b | `scripts/run_multi_asset_backtest.py`, `docs/findings/phase42_multi_asset_decision_memo.md` | Empirical run BTC/ETH/SPY/GLD daily 2017–2026 (2121 bars). NO-GO: regime_mvo Sharpe=0.450 vs global_min_var=0.937. Regime conditioning adds +0.11 over equal_weight but loses to pure variance minimisation by −0.487 Sharpe. Root cause: mixed crypto+equity portfolio — structural vol difference (BTC 80% vs SPY 15%) dominates any directional tilt from HMM. See `docs/findings/phase42_multi_asset_decision_memo.md` |
 | 42c | `analysis/multi_asset_allocation.py` (`regime_informed_min_var`), `docs/findings/phase42_multi_asset_decision_memo.md` | Regime-informed min-var probe: exclude assets with posterior-weighted E[r] < 0 from eligible min-var set. NO-GO: Sharpe=0.410 vs global_min_var=0.937. MDD=67.4% (same as equal_weight) — regime exclusions do not protect against the large crypto drawdowns that define the gap. Root cause: onset latency (HMM is backward-looking at crash onset), min_eligible fallback retains crypto during bear markets. The entire BTC/ETH/SPY/GLD universe is exhausted. See `docs/findings/phase42_multi_asset_decision_memo.md` |
 | 43 | `configs/spy_daily.yaml`, `docs/findings/phase43_equity_only_decision_memo.md` | Equity-only probe SPY/GLD/TLT/IEF daily 2004–2026 (5381 bars). PARTIAL POSITIVE: regime_mvo achieves MDD=16.0% vs global_min_var MDD=21.7% — first result where regime conditioning beats pure min-var on drawdown. Calmar: regime_mvo 0.308 vs global_min_var 0.306 (tied). Sharpe still FAIL (0.661 vs 0.929) — strategy too conservative, undershoots rallies. Root cause: strategy design problem (binary on/off), not signal quality problem. Next: Phase 37 purged CV on SPY daily to validate signal stability. See `docs/findings/phase43_equity_only_decision_memo.md` |
+| 43b | `docs/findings/phase43b_spy_phase37_validation.md` | SPY daily n=8 Phase 37 NO-GO: ARI=0.311, 0/5 baselines beaten, two_state_hmm dominates by −0.630 margin. n=8 overfit for SPY — BIC audit shows no elbow. |
+| 43c | `docs/findings/phase43c_spy_n_sweep.md` | n-states sweep n=2/3/8 on SPY daily. n=3 is best: ARI=**0.393** (just 0.007 below threshold), shuffle margin=−0.027 (nearly neutral), Sharpe=0.587. Single-asset directional still NO-GO but n=3 is best signal quality yet. Phase 44 re-runs equity portfolio with n=3. |
 
 ### Full pipeline (paper trading)
 
@@ -636,9 +638,9 @@ Sharpe fails (0.661 vs 0.929) due to strategy over-conservatism, not signal
 weakness. **Phase 37 purged CV validation on SPY daily is running.**
 
 **Confirmed next directions in priority order:**
-1. **Phase 37 validation on SPY daily** — validate signal stability (ARI ≥ 0.40, random-baseline margin > 0.30). If passes → design improved multi-asset strategy.
-2. **Improved equity strategy design** (if SPY passes Phase 37) — soft regime tilts instead of binary on/off, to capture both downside protection and upside.
-3. **Options / vol forecasting** — regime labels as implied-vol forecast input; ARI=0.742 confirms stable vol regime structure.
+1. **Phase 44: equity portfolio n=3** — re-run SPY/GLD/TLT/IEF multi-asset backtest with n=3 (ARI 0.311→0.393). Did more stable regime labels improve portfolio Sharpe vs global_min_var (0.929)?
+2. **Options / vol forecasting** — vol-based baselines (vol_targeted_bah, naive_vol_regime) consistently outperform directional HMM in equity; regime labels are vol predictors, not return predictors.
+3. **Improved equity strategy design** (if Phase 44 partial positive) — soft regime tilts, regime-conditional vol budgeting, multi-asset soft weighting.
 
 The Notion roadmap and tasks database are the source of truth for sequencing. Update Notion as work progresses.
 
