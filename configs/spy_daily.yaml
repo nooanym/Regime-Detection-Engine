@@ -1,0 +1,52 @@
+# SPY daily bar configuration — Phase 43 equity-only probe.
+#
+# Full available history via yfinance period="max", interval="1d".
+# SPY daily data goes back to 1993 on Yahoo Finance, giving ~8 300 bars.
+# The equity-only multi-asset backtest (Phase 43) showed regime_mvo achieving
+# MDD=16.0% vs global_min_var MDD=21.7% — the first time regime conditioning
+# reduced drawdowns better than pure variance minimisation. Phase 37 validation
+# on SPY alone tests whether the underlying HMM signal is genuinely stable.
+#
+# Feature windows follow the daily BTC template:
+#   vol_w20  ≈ 1 trading month
+#   smooth_w5 ≈ 1 trading week
+#
+# ann_factor: 252 (trading days per year).
+# Embargo: 5 days for purged CV.
+
+asset:
+  symbol: SPY
+  period: max
+  interval: 1d
+
+features:
+  - name: LogReturns
+  - name: RollingVolatility
+    params:
+      window: 20
+  - name: SmoothedReturns
+    params:
+      window: 5
+
+model:
+  candidate_states: [2, 3, 4, 5, 6, 7, 8]
+  covariance_type: full
+  n_restarts: 10
+  n_iter: 1000
+  init_strategy: kmeans
+  seed_base: 42
+  emission_dist: gaussian
+
+selection:
+  criterion: bic
+
+run:
+  output_dir: results/SPY-daily/
+
+evaluation:
+  run_stability: false
+  stability_n_runs: 3
+  run_walk_forward: false
+  walk_forward_train_window: 365d
+  walk_forward_recalibration: quarterly
+  walk_forward_n_restarts: 3
