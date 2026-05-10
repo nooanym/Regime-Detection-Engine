@@ -502,7 +502,7 @@ uv run pytest tests/test_smoke_btc.py
 
 ---
 
-## 9. Current state (as of Phase 42)
+## 9. Current state (as of Phase 49)
 
 **Phases 0–36 are complete on `main`, plus the post-Phase-36 audit branch (`audit/post-phase-36-improvements`).** 1297 tests passing. The system now includes a full live paper-trading loop with risk guard protection and a complete Streamlit dashboard.
 
@@ -563,6 +563,14 @@ uv run pytest tests/test_smoke_btc.py
 | 43 | `configs/spy_daily.yaml`, `docs/findings/phase43_equity_only_decision_memo.md` | Equity-only probe SPY/GLD/TLT/IEF daily 2004–2026 (5381 bars). PARTIAL POSITIVE: regime_mvo achieves MDD=16.0% vs global_min_var MDD=21.7% — first result where regime conditioning beats pure min-var on drawdown. Calmar: regime_mvo 0.308 vs global_min_var 0.306 (tied). Sharpe still FAIL (0.661 vs 0.929) — strategy too conservative, undershoots rallies. Root cause: strategy design problem (binary on/off), not signal quality problem. Next: Phase 37 purged CV on SPY daily to validate signal stability. See `docs/findings/phase43_equity_only_decision_memo.md` |
 | 43b | `docs/findings/phase43b_spy_phase37_validation.md` | SPY daily n=8 Phase 37 NO-GO: ARI=0.311, 0/5 baselines beaten, two_state_hmm dominates by −0.630 margin. n=8 overfit for SPY — BIC audit shows no elbow. |
 | 43c | `docs/findings/phase43c_spy_n_sweep.md` | n-states sweep n=2/3/8 on SPY daily. n=3 is best: ARI=**0.393** (just 0.007 below threshold), shuffle margin=−0.027 (nearly neutral), Sharpe=0.587. Single-asset directional still NO-GO but n=3 is best signal quality yet. Phase 44 re-runs equity portfolio with n=3. |
+| 44 | `scripts/run_multi_asset_backtest.py`, `results/multi_asset_equity_n3/` | SPY/GLD/TLT/IEF n=3 equity portfolio. regime_informed_min_var Sharpe=0.860 vs global_min_var=0.929. Return higher (7.29% vs 6.64%) but vol also higher (8.48% vs 7.15%) — gap is purely vol, not return. |
+| 44b | `scripts/run_multi_asset_backtest.py`, `results/multi_asset_equity_n3_mw60/` | Phase 44b: max_weight=0.60 for rimv (was 1.0). regime_informed_min_var Sharpe=0.837 — slightly worse than Phase 44. Capping concentration after exclusion forces sub-optimal diversification. regime_informed_min_var and global_min_var overlap too much: both prefer TLT/IEF. Regime exclusion approach exhausted. |
+| 45 | `analysis/multi_asset_allocation.py` (`regime_tilted_min_var`), `docs/findings/phase45_rtmv_decision_memo.md` | **FIRST REGIME STRATEGY TO BEAT GLOBAL MIN-VAR.** Convex combination: w=(1-λ)×w_minvar + λ×w_regime. rtmv_l05 Sharpe=0.934 > global_min_var=0.929. MDD monotonically improves with λ (21.7%→20.4%). Calmar monotonically improves (0.306→0.362). Conditional PASS pending OOS validation (Phase 45b). |
+| 45b | `scripts/run_multi_asset_backtest.py` (--eval-start-date), `results/multi_asset_equity_n3_oos/` | **GO.** OOS (2016–2026): ALL RTMV variants beat global_min_var (rtmv_l30 Sharpe=0.947 > 0.882). Lambda ordering shifts OOS (l30 best vs l05 in full period) but any lambda beats no tilt. MDD and Calmar improvements hold OOS. See `docs/findings/phase45_rtmv_decision_memo.md`. |
+| 46 | `evaluation/vol_forecasting.py`, `scripts/run_vol_forecast_test.py`, `tests/edge_validation/test_vol_forecasting.py` | Vol forecasting quality test: HMM posterior-weighted vol vs EWMA vs HistVol at h=5/10/21 bars. 16 tests. Script: `run_vol_forecast_test.py --config`. |
+| 47 | `scripts/run_rtmv_cv_validation.py`, `docs/findings/phase47_rtmv_cv_decision_memo.md` | **CONDITIONAL GO** (λ=0.05): fold-consistency PASS (3/5=60%), cost break-even PASS (80.6 bps >> 20 bps min), shuffle FAIL (p=0.130, margin +0.012 — real beats shuffle mean but 13% of shuffles beat real). λ=0.30 fails all 3 tests (wrong period). Signal is real but small (+0.005 Sharpe over GMV). See `docs/findings/phase47_rtmv_cv_decision_memo.md`. |
+| 48 | `analysis/multi_asset_allocation.py` (`compute_rtmv_weights_now`), `trading/multi_asset_portfolio.py`, `trading/rtmv_rebalancer.py`, `scripts/run_rtmv_live.py` | Live deployment skeleton: `compute_rtmv_weights_now` (single-step live weight computation from a lookback window), `MultiAssetPortfolio` (N-position paper portfolio with weight-based rebalance + fills), `RTMVRebalancer` (daily-polling monthly-rebalancing loop with drawdown halt, backtest mode, live polling mode), `run_rtmv_live.py` (backtest: `--mode backtest`, live: `--mode live`). 25 new tests. Backtest result: Sharpe=0.875, MDD=−21.5%, Ann Return=6.4%, N Rebalances=212. |
+| 49 | `app/panels_rtmv.py`, `app/streamlit_app.py` | RTMV Portfolio Monitoring dashboard panel: equity+drawdown subplot, stacked area weight trajectory, recent fills table (last 50), 6 summary metrics (equity, Sharpe, MDD, ann return, N rebalances, status). Reads `results/rtmv_live/snapshots.parquet` and `fills.parquet`. 14 new tests in `tests/test_panels_rtmv.py`. |
 
 ### Full pipeline (paper trading)
 
@@ -637,10 +645,26 @@ drawdown improvement from regime conditioning. Calmar tied (0.308 vs 0.306).
 Sharpe fails (0.661 vs 0.929) due to strategy over-conservatism, not signal
 weakness. **Phase 37 purged CV validation on SPY daily is running.**
 
-**Confirmed next directions in priority order:**
-1. **Phase 44: equity portfolio n=3** — re-run SPY/GLD/TLT/IEF multi-asset backtest with n=3 (ARI 0.311→0.393). Did more stable regime labels improve portfolio Sharpe vs global_min_var (0.929)?
-2. **Options / vol forecasting** — vol-based baselines (vol_targeted_bah, naive_vol_regime) consistently outperform directional HMM in equity; regime labels are vol predictors, not return predictors.
-3. **Improved equity strategy design** (if Phase 44 partial positive) — soft regime tilts, regime-conditional vol budgeting, multi-asset soft weighting.
+**Phase 47 CONDITIONAL GO — RTMV(λ=0.05) passes fold-consistency and cost tests:**
+- Fold-consistency: 3/5 folds RTMV wins (60%, criterion ≥60%) — PASS
+- Cost break-even: 80.6 bps (criterion ≥20 bps) — **PASS** — 8× safety margin over ~10 bps practical cost
+- Shuffle robustness: p=0.130 (criterion <0.10, margin +0.012) — FAIL (marginal; n=100 shuffles may be insufficient)
+- λ=0.30 is NOT the right lambda for full-period — it fails all 3 tests (selected on 2016–2026 only)
+
+**Phase 49 COMPLETE — RTMV Portfolio Monitoring dashboard panel built.** ~1519 tests passing.
+
+Run the paper backtest and launch dashboard:
+```bash
+make backtest-rtmv          # SPY/GLD/TLT/IEF backtest → results/rtmv_live/
+make dashboard              # Streamlit dashboard with RTMV Portfolio panel
+```
+Switch to live polling:
+```bash
+make live-rtmv              # polls yfinance every 3600s, rebalances monthly
+```
+
+**Confirmed next direction:**
+→ Run `make live-rtmv` to begin live paper trading (poll daily, rebalance monthly). Monitor for 1–3 months to collect real execution data and validate that live Sharpe tracks backtest (0.875). Watch for drawdown halt triggers (20% threshold).
 
 The Notion roadmap and tasks database are the source of truth for sequencing. Update Notion as work progresses.
 

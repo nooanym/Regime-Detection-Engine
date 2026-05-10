@@ -1,4 +1,4 @@
-"""Live trading utilities (Phases 34–36).
+"""Live trading utilities (Phases 34–36, 48).
 
 Public API
 ----------
@@ -6,6 +6,16 @@ Paper portfolio
   - :class:`PaperPortfolio` — simulated portfolio tracking cash, position, P&L.
   - :class:`PortfolioConfig` — configuration for :class:`PaperPortfolio`.
   - :class:`Fill` — record of a single simulated fill.
+
+Multi-asset portfolio (Phase 48)
+  - :class:`MultiAssetPortfolio` — N-position paper portfolio for weight-based rebalancing.
+  - :class:`MultiAssetPortfolioConfig` — configuration for :class:`MultiAssetPortfolio`.
+  - :class:`MultiAssetFill` — per-fill record for multi-asset portfolio.
+
+RTMV rebalancer (Phase 48)
+  - :class:`RTMVRebalancer` — daily-polling, monthly-rebalancing RTMV portfolio manager.
+  - :class:`RTMVRebalancerConfig` — configuration for :class:`RTMVRebalancer`.
+  - :class:`RTMVRebalancerState` — mutable runtime state.
 
 Signal strategy
   - :class:`RegimeSignalStrategy` — maps HMM regime to target weight / quantity.
@@ -34,6 +44,16 @@ Risk guard
 """
 
 from rde.trading.paper_portfolio import Fill, PaperPortfolio, PortfolioConfig
+from rde.trading.multi_asset_portfolio import (
+    MultiAssetFill,
+    MultiAssetPortfolio,
+    MultiAssetPortfolioConfig,
+)
+from rde.trading.rtmv_rebalancer import (
+    RTMVRebalancer,
+    RTMVRebalancerConfig,
+    RTMVRebalancerState,
+)
 from rde.trading.signal_strategy import RegimeRule, RegimeSignalStrategy, SignalStrategyConfig
 from rde.trading.trade_log import TradeLog
 from rde.trading.exchange import (
@@ -57,6 +77,14 @@ __all__ = [
     "Fill",
     "PaperPortfolio",
     "PortfolioConfig",
+    # multi-asset portfolio (Phase 48)
+    "MultiAssetFill",
+    "MultiAssetPortfolio",
+    "MultiAssetPortfolioConfig",
+    # RTMV rebalancer (Phase 48)
+    "RTMVRebalancer",
+    "RTMVRebalancerConfig",
+    "RTMVRebalancerState",
     # signal strategy
     "RegimeRule",
     "RegimeSignalStrategy",

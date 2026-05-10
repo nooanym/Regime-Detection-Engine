@@ -175,6 +175,12 @@ try:
 except ImportError:
     _CONCORDANCE_PANEL_AVAILABLE = False
 
+try:
+    from panels_rtmv import _panel_rtmv_portfolio
+    _RTMV_PANEL_AVAILABLE = True
+except ImportError:
+    _RTMV_PANEL_AVAILABLE = False
+
 # ---------------------------------------------------------------------------
 # Panel builders
 # ---------------------------------------------------------------------------
@@ -748,6 +754,8 @@ def main() -> None:
             # Phase 36 — paper-trading + concordance
             "Trade History",
             "Regime Concordance",
+            # Phase 49 — RTMV portfolio monitoring
+            "RTMV Portfolio",
         ]
         selected_panels = st.multiselect(
             "Panels to display",
@@ -947,6 +955,13 @@ def main() -> None:
             _panel_concordance(RESULTS_DIR / "comparison")
         else:
             st.warning("panels_concordance.py not found.")
+
+    if "RTMV Portfolio" in selected_panels:
+        st.markdown("---")
+        if _RTMV_PANEL_AVAILABLE:
+            _panel_rtmv_portfolio(RESULTS_DIR)
+        else:
+            st.warning("panels_rtmv.py not found — refresh.")
 
     # ------------------------------------------------------------------
     # Raw diagnostics expander

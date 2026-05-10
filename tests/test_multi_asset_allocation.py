@@ -9,10 +9,13 @@ import pytest
 from rde.analysis.multi_asset_allocation import (
     MultiAssetConfig,
     MultiAssetResult,
+    collect_rtmv_rebalance_cache,
     compare_allocations,
     equal_weight_baseline,
     global_min_var_baseline,
     regime_informed_min_var,
+    regime_tilted_min_var,
+    regime_tilted_min_var_from_cache,
     run_multi_asset_allocation,
 )
 
@@ -374,3 +377,205 @@ class TestRegimeInformedMinVar:
         feats = _make_features(ret)
         result = regime_informed_min_var(ret, feats, config=_fast_config())
         assert len(result.portfolio_returns) == len(ret)
+
+
+class TestRegimeTiltedMinVar:
+    def test_returns_result_type(self) -> None:
+        ret = _make_returns()
+        feats = _make_features(ret)
+        result = regime_tilted_min_var(ret, feats, config=_fast_config())
+        assert isinstance(result, MultiAssetResult)
+
+    def test_name(self) -> None:
+        ret = _make_returns()
+        feats = _make_features(ret)
+        result = regime_tilted_min_var(ret, feats, config=_fast_config())
+        assert result.name == "regime_tilted_min_var"
+
+    def test_weights_shape(self) -> None:
+        ret = _make_returns()
+        feats = _make_features(ret)
+        result = regime_tilted_min_var(ret, feats, config=_fast_config())
+        assert result.weights.shape == (len(ret), ret.shape[1])
+
+    def test_weights_long_only(self) -> None:
+        ret = _make_returns()
+        feats = _make_features(ret)
+        result = regime_tilted_min_var(ret, feats, config=_fast_config())
+        assert (result.weights.values >= -1e-9).all()
+
+    def test_lambda_zero_resembles_min_var(self) -> None:
+        """lambda=0 should be identical to global_min_var_baseline."""
+        ret = _make_returns()
+        feats = _make_features(ret)
+        cfg = _fast_config()
+        rtmv = regime_tilted_min_var(ret, feats, config=cfg, lambda_tilt=0.0)
+        mv = global_min_var_baseline(
+            ret,
+            ann_factor=cfg.ann_factor,
+            rebalance_bars=cfg.rebalance_bars,
+            cov_window_bars=cfg.cov_window_bars,
+            transaction_cost=cfg.transaction_cost,
+        )
+        assert abs(rtmv.sharpe - mv.sharpe) < 0.05
+
+    def test_metrics_finite(self) -> None:
+        ret = _make_returns()
+        feats = _make_features(ret)
+        result = regime_tilted_min_var(ret, feats, config=_fast_config())
+        assert np.isfinite(result.sharpe)
+        assert np.isfinite(result.calmar)
+        assert np.isfinite(result.max_drawdown)
+
+    def test_invalid_lambda_raises(self) -> None:
+        ret = _make_returns()
+        feats = _make_features(ret)
+        with pytest.raises(ValueError, match="lambda_tilt"):
+            regime_tilted_min_var(ret, feats, config=_fast_config(), lambda_tilt=1.5)
+
+    def test_requires_at_least_two_assets(self) -> None:
+        ret = _make_returns(N=1)
+        feats = _make_features(ret)
+        with pytest.raises(ValueError, match="2 assets"):
+            regime_tilted_min_var(ret, feats, config=_fast_config())
+
+    def test_portfolio_returns_length(self) -> None:
+        ret = _make_returns()
+        feats = _make_features(ret)
+        result = regime_tilted_min_var(ret, feats, config=_fast_config())
+        assert len(result.portfolio_returns) == len(ret)
+
+    def test_lambda_grid_sharpe_monotone(self) -> None:
+        """Higher lambda should shift results (not necessarily monotone, but all finite)."""
+        ret = _make_returns()
+        feats = _make_features(ret)
+        cfg = _fast_config()
+        for lam in [0.0, 0.1, 0.3, 0.5]:
+            r = regime_tilted_min_var(ret, feats, config=cfg, lambda_tilt=lam)
+            assert np.isfinite(r.sharpe), f"lambda={lam} gives non-finite Sharpe"
+
+    def test_shuffle_seed_produces_different_result(self) -> None:
+        """shuffle_seed=N changes portfolio returns vs no shuffle."""
+        ret = _make_returns(T=350)
+        feats = _make_features(ret)
+        cfg = _fast_config()
+        real = regime_tilted_min_var(ret, feats, config=cfg, lambda_tilt=0.2)
+        shuffled = regime_tilted_min_var(
+            ret, feats, config=cfg, lambda_tilt=0.2, shuffle_seed=42
+        )
+        assert not np.allclose(
+            real.portfolio_returns.values,
+            shuffled.portfolio_returns.values,
+        ), "Shuffled result should differ from unshuffled"
+
+    def test_shuffle_result_is_finite(self) -> None:
+        ret = _make_returns(T=350)
+        feats = _make_features(ret)
+        result = regime_tilted_min_var(
+            ret, feats, config=_fast_config(), lambda_tilt=0.2, shuffle_seed=7
+        )
+        assert np.isfinite(result.sharpe)
+        assert len(result.portfolio_returns) == len(ret)
+
+    def test_shuffle_seed_none_unchanged(self) -> None:
+        """shuffle_seed=None (default) must produce the same result as before."""
+        ret = _make_returns(T=350)
+        feats = _make_features(ret)
+        cfg = _fast_config()
+        r1 = regime_tilted_min_var(ret, feats, config=cfg, lambda_tilt=0.1)
+        r2 = regime_tilted_min_var(ret, feats, config=cfg, lambda_tilt=0.1, shuffle_seed=None)
+        assert np.allclose(r1.portfolio_returns.values, r2.portfolio_returns.values)
+
+
+# ---------------------------------------------------------------------------
+# Phase 47: cache functions and CV validation helpers
+# ---------------------------------------------------------------------------
+
+
+class TestCollectRTMVRebalanceCache:
+    """Tests for the HMM fit cache used by Phase 47."""
+
+    def test_cache_structure(self) -> None:
+        ret = _make_returns(T=350)
+        feats = _make_features(ret)
+        cfg = _fast_config()
+        cache = collect_rtmv_rebalance_cache(ret, feats, config=cfg)
+        assert len(cache) > 0
+        entry = cache[0]
+        assert "t" in entry and "w_minvar" in entry and "exp_returns" in entry
+        assert entry["w_minvar"].shape == (len(ret.columns),)
+        assert entry["exp_returns"].shape == (len(ret.columns),)
+
+    def test_cache_weights_sum_to_one(self) -> None:
+        ret = _make_returns(T=350)
+        feats = _make_features(ret)
+        cache = collect_rtmv_rebalance_cache(ret, feats, config=_fast_config())
+        for entry in cache:
+            assert abs(entry["w_minvar"].sum() - 1.0) < 1e-6
+
+    def test_from_cache_matches_direct(self) -> None:
+        """regime_tilted_min_var and regime_tilted_min_var_from_cache give same result."""
+        ret = _make_returns(T=350)
+        feats = _make_features(ret)
+        cfg = _fast_config()
+        r_direct = regime_tilted_min_var(ret, feats, config=cfg, lambda_tilt=0.2)
+        cache = collect_rtmv_rebalance_cache(ret, feats, config=cfg)
+        r_cached = regime_tilted_min_var_from_cache(ret, cache, config=cfg, lambda_tilt=0.2)
+        assert np.isfinite(r_direct.sharpe)
+        assert np.isfinite(r_cached.sharpe)
+        # Sharpes should be identical (same HMM seeds, same data)
+        assert abs(r_direct.sharpe - r_cached.sharpe) < 1e-6
+
+    def test_from_cache_shuffle_differs(self) -> None:
+        ret = _make_returns(T=350)
+        feats = _make_features(ret)
+        cfg = _fast_config()
+        cache = collect_rtmv_rebalance_cache(ret, feats, config=cfg)
+        r_real = regime_tilted_min_var_from_cache(ret, cache, config=cfg, lambda_tilt=0.2)
+        r_shuf = regime_tilted_min_var_from_cache(
+            ret, cache, config=cfg, lambda_tilt=0.2, shuffle_seed=42
+        )
+        assert not np.allclose(
+            r_real.portfolio_returns.values, r_shuf.portfolio_returns.values,
+        )
+
+
+class TestRTMVCVValidation:
+    """Tests for the Phase 47 CV validation helpers."""
+
+    def test_fold_sharpes_length(self) -> None:
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+        from run_rtmv_cv_validation import _fold_sharpes
+
+        ret = _make_returns()
+        cfg = _fast_config()
+        mv = global_min_var_baseline(
+            ret,
+            ann_factor=cfg.ann_factor,
+            rebalance_bars=cfg.rebalance_bars,
+            cov_window_bars=cfg.cov_window_bars,
+            transaction_cost=cfg.transaction_cost,
+        )
+        fold_sh = _fold_sharpes(mv.portfolio_returns, n_folds=4, ann_factor=252)
+        assert len(fold_sh) == 4
+        assert all(np.isfinite(s) for s in fold_sh)
+
+    def test_interpolate_break_even_exact_zero(self) -> None:
+        from scripts.run_rtmv_cv_validation import _interpolate_break_even
+        be = _interpolate_break_even([10, 50, 100, 200], [0.10, 0.05, -0.02, -0.10])
+        assert 50.0 < be < 100.0
+
+    def test_interpolate_break_even_never(self) -> None:
+        from scripts.run_rtmv_cv_validation import _interpolate_break_even
+        be = _interpolate_break_even([10, 50, 100], [0.05, 0.03, 0.01])
+        assert be == float("inf")
+
+    def test_rtmv_cv_result_dataclass(self) -> None:
+        from scripts.run_rtmv_cv_validation import RTMVCVResult
+        r = RTMVCVResult(lambda_tilt=0.30, n_folds=5)
+        assert r.lambda_tilt == 0.30
+        assert r.n_folds == 5
+        assert r.fold_sharpe_rtmv == []
+        assert r.pct_folds_rtmv_wins == 0.0

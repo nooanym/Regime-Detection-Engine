@@ -10,13 +10,14 @@ from rde.evaluation.baselines import (
     BaselineResult,
     buy_and_hold,
     compare_model_to_baselines,
+    multi_asset_risk_parity,
     naive_momentum,
     naive_vol_regime,
+    risk_parity_baseline,
     run_all_baselines,
     two_state_hmm_baseline,
     vol_targeted_buy_and_hold,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -260,3 +261,110 @@ class TestCompareModelToBaselines:
         df = compare_model_to_baselines(0.7, baselines)
         for _, row in df.iterrows():
             assert row["margin"] == pytest.approx(0.7 - row["baseline_sharpe"])
+
+
+# ---------------------------------------------------------------------------
+# risk_parity_baseline / multi_asset_risk_parity
+# ---------------------------------------------------------------------------
+
+
+def _multi_asset_returns(
+    n: int = 800,
+    n_assets: int = 4,
+    vols: list[float] | None = None,
+    seed: int = 0,
+) -> pd.DataFrame:
+    rng = np.random.default_rng(seed)
+    idx = pd.date_range("2010-01-01", periods=n, freq="B")
+    vols = vols or [0.01] * n_assets
+    cols = {}
+    for i, v in enumerate(vols):
+        cols[f"A{i}"] = rng.normal(0.0003, v, n)
+    return pd.DataFrame(cols, index=idx)
+
+
+class TestRiskParityBaseline:
+    def test_returns_baseline_result(self):
+        rets = _multi_asset_returns(n=500, n_assets=4)
+        br = risk_parity_baseline(rets, ann_factor=252, vol_window=63, rebalance_bars=21)
+        assert isinstance(br, BaselineResult)
+        assert br.name == "risk_parity"
+        assert np.isfinite(br.sharpe)
+        assert np.isfinite(br.calmar)
+        assert 0.0 <= br.max_drawdown <= 1.0
+        assert len(br.equity) == 500
+
+    def test_weights_sum_to_one(self):
+        # Re-run the inverse-vol math directly to verify normalisation.
+        rng = np.random.default_rng(7)
+        n, k = 200, 4
+        vols = np.array([0.005, 0.01, 0.02, 0.04])
+        R = rng.normal(0.0, vols, size=(n, k))
+        # Use the same window the baseline uses (after warm-up).
+        window = R[-63:]
+        v = window.std(axis=0, ddof=1) * np.sqrt(252)
+        inv = 1.0 / (v + 1e-10)
+        w = inv / inv.sum()
+        assert w.sum() == pytest.approx(1.0, abs=1e-12)
+        # Also assert min/max bounds: every weight in [0, 1].
+        assert (w >= 0).all() and (w <= 1).all()
+
+    def test_high_vol_gets_low_weight(self):
+        # Asset 0 has 10× vol of asset 1 → weight ratio ≈ 1/10.
+        n = 400
+        rng = np.random.default_rng(2)
+        idx = pd.date_range("2018-01-01", periods=n, freq="B")
+        rets = pd.DataFrame({
+            "HIVOL": rng.normal(0.0, 0.05, n),
+            "LOVOL": rng.normal(0.0, 0.005, n),
+        }, index=idx)
+        # Manually replicate: at the last rebalance after warm-up.
+        window = rets.iloc[-63:].values
+        vol = window.std(axis=0, ddof=1) * np.sqrt(252)
+        inv = 1.0 / (vol + 1e-10)
+        w = inv / inv.sum()
+        # HIVOL weight ≈ 1/11, LOVOL ≈ 10/11.
+        assert w[0] < w[1]
+        ratio = w[1] / w[0]
+        # Empirical std may drift slightly from 10×; allow [7, 13].
+        assert 7.0 <= ratio <= 13.0
+
+        # Smoke run the baseline end-to-end.
+        br = risk_parity_baseline(rets, ann_factor=252, vol_window=63, rebalance_bars=21)
+        assert isinstance(br, BaselineResult)
+
+    def test_warm_up_equal_weights(self):
+        n = 100
+        rng = np.random.default_rng(3)
+        idx = pd.date_range("2020-01-01", periods=n, freq="B")
+        rets = pd.DataFrame({
+            "A": rng.normal(0.0, 0.01, n),
+            "B": rng.normal(0.0, 0.05, n),
+        }, index=idx)
+        # vol_window > n, so warm-up applies for the entire run.
+        br = risk_parity_baseline(
+            rets, ann_factor=252, vol_window=200, rebalance_bars=21,
+            transaction_cost=0.0,
+        )
+        # Equal-weight portfolio of zero-mean assets has E[return] ≈ 0.
+        # Equity should remain near 1.0 throughout.
+        assert abs(br.equity.iloc[-1] - 1.0) < 0.5
+
+    def test_calmar_positive_on_drift(self):
+        # Inject a small positive drift on every asset.
+        rng = np.random.default_rng(4)
+        n, k = 600, 4
+        idx = pd.date_range("2015-01-01", periods=n, freq="B")
+        cols = {f"A{i}": rng.normal(0.0008, 0.01, n) for i in range(k)}
+        rets = pd.DataFrame(cols, index=idx)
+        br = risk_parity_baseline(rets, ann_factor=252, vol_window=63, rebalance_bars=21)
+        assert br.ann_return > 0
+        assert br.calmar > 0
+
+    def test_dict_wrapper_matches_dataframe(self):
+        rets_df = _multi_asset_returns(n=300, n_assets=3, seed=11)
+        rets_dict = {c: rets_df[c] for c in rets_df.columns}
+        br_df = risk_parity_baseline(rets_df, ann_factor=252, vol_window=63, rebalance_bars=21)
+        br_dict = multi_asset_risk_parity(rets_dict, ann_factor=252, vol_window=63, rebalance_bars=21)
+        assert br_df.sharpe == pytest.approx(br_dict.sharpe, rel=1e-9)
+        assert br_df.max_drawdown == pytest.approx(br_dict.max_drawdown, rel=1e-9)

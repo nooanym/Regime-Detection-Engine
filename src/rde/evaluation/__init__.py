@@ -4,8 +4,10 @@ from rde.evaluation.baselines import (
     BaselineResult,
     buy_and_hold,
     compare_model_to_baselines,
+    multi_asset_risk_parity,
     naive_momentum,
     naive_vol_regime,
+    risk_parity_baseline,
     run_all_baselines,
     two_state_hmm_baseline,
     vol_targeted_buy_and_hold,
@@ -52,6 +54,11 @@ from rde.evaluation.skeptics import (
 )
 from rde.evaluation.stability import stability_across_restarts
 from rde.evaluation.transition import stationary_distribution, transition_entropy
+from rde.evaluation.vol_forecasting import (
+    VolForecastResult,
+    compare_vol_forecasters,
+    run_vol_forecast_cv,
+)
 from rde.evaluation.walk_forward import WalkForwardHarness
 
 __all__ = [
@@ -76,6 +83,8 @@ __all__ = [
     "naive_momentum",
     "naive_vol_regime",
     "two_state_hmm_baseline",
+    "risk_parity_baseline",
+    "multi_asset_risk_parity",
     "run_all_baselines",
     "compare_model_to_baselines",
     # Phase 37.4 — Feature importance
@@ -104,4 +113,8 @@ __all__ = [
     "regime_stats_to_dataframe",
     "regime_transition_table",
     "transition_forecast",
+    # Phase 46 — Vol forecasting quality
+    "VolForecastResult",
+    "run_vol_forecast_cv",
+    "compare_vol_forecasters",
 ]

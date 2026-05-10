@@ -281,6 +281,133 @@ def naive_vol_regime(
     return _tearsheet_to_baseline("naive_vol_regime", bt, ann_factor)
 
 
+def risk_parity_baseline(
+    returns: pd.DataFrame,
+    ann_factor: int = 252,
+    vol_window: int = 63,
+    rebalance_bars: int = 21,
+    transaction_cost: float = 0.0001,
+) -> BaselineResult:
+    """Multi-asset inverse-vol (risk parity) baseline.
+
+    At each rebalance bar, weights are proportional to the inverse of each
+    asset's trailing realized volatility (causal: only data strictly before
+    bar ``t`` is used for the vol estimate). For ``t < vol_window`` the
+    portfolio holds equal weights as a warm-up.
+
+    Weights are held constant between rebalances. Transaction cost is
+    charged at each rebalance proportional to the L1 weight change.
+
+    Parameters
+    ----------
+    returns : pd.DataFrame
+        Daily log returns, columns = asset names.
+    ann_factor : int
+        Bars per year for annualisation (252 for daily).
+    vol_window : int
+        Rolling window length for volatility estimation.
+    rebalance_bars : int
+        Rebalance every N bars.
+    transaction_cost : float
+        One-way cost as a fraction of weight change.
+
+    Returns
+    -------
+    BaselineResult
+    """
+    if returns.empty:
+        raise ValueError("risk_parity_baseline: empty returns DataFrame")
+    if returns.isna().any().any():
+        returns = returns.dropna()
+
+    R = returns.values
+    T, N = R.shape
+    equal_w = np.full(N, 1.0 / N)
+
+    weights = np.zeros((T, N))
+    cur_w = equal_w.copy()
+    rebal_count = 0
+    tc_drag_per_bar = np.zeros(T)
+
+    for t in range(T):
+        # Decide whether to rebalance at the *open* of bar t (use data through
+        # bar t-1 only — strictly causal).
+        if t % rebalance_bars == 0:
+            if t < vol_window:
+                new_w = equal_w.copy()
+            else:
+                window = R[t - vol_window: t]
+                vol = window.std(axis=0, ddof=1) * np.sqrt(ann_factor)
+                inv = 1.0 / (vol + 1e-10)
+                new_w = inv / inv.sum()
+            l1_change = float(np.abs(new_w - cur_w).sum())
+            tc_drag_per_bar[t] = l1_change * transaction_cost
+            cur_w = new_w
+            rebal_count += 1
+        weights[t] = cur_w
+
+    # Portfolio bar return = w_t · r_t  (weights set at open, returns realised over bar)
+    bar_returns = (weights * R).sum(axis=1) - tc_drag_per_bar
+    equity = np.cumprod(1.0 + bar_returns)
+
+    eq_arr = np.concatenate([[1.0], equity])
+    mu = float(bar_returns.mean()) * ann_factor
+    sig = float(bar_returns.std(ddof=1)) * np.sqrt(ann_factor) + 1e-15
+    sharpe = mu / sig
+    peak = np.maximum.accumulate(eq_arr)
+    dd = (eq_arr - peak) / (peak + 1e-15)
+    mdd = float(-dd.min())
+    calmar = mu / (mdd + 1e-15)
+
+    equity_series = pd.Series(equity, index=returns.index)
+
+    return BaselineResult(
+        name="risk_parity",
+        sharpe=float(sharpe),
+        calmar=float(calmar),
+        max_drawdown=float(mdd),
+        ann_return=float(mu),
+        ann_vol=float(sig),
+        n_trades=int(rebal_count),
+        equity=equity_series,
+    )
+
+
+def multi_asset_risk_parity(
+    asset_returns: dict[str, pd.Series],
+    ann_factor: int = 252,
+    vol_window: int = 63,
+    rebalance_bars: int = 21,
+    transaction_cost: float = 0.0001,
+) -> BaselineResult:
+    """Convenience wrapper assembling a returns DataFrame from a dict.
+
+    Parameters
+    ----------
+    asset_returns : dict[str, pd.Series]
+        Mapping asset name → daily log return series. Series are
+        intersected on a common DatetimeIndex.
+    ann_factor : int
+    vol_window : int
+    rebalance_bars : int
+    transaction_cost : float
+
+    Returns
+    -------
+    BaselineResult
+    """
+    if not asset_returns:
+        raise ValueError("multi_asset_risk_parity: empty asset_returns dict")
+    df = pd.DataFrame(asset_returns).dropna()
+    return risk_parity_baseline(
+        df,
+        ann_factor=ann_factor,
+        vol_window=vol_window,
+        rebalance_bars=rebalance_bars,
+        transaction_cost=transaction_cost,
+    )
+
+
 def two_state_hmm_baseline(
     df_features: pd.DataFrame,
     feature_cols: list[str],

@@ -90,15 +90,42 @@ If SPY's HMM signal passes Phase 37, the strategy design can be improved:
 
 ---
 
+## Phase 44 Results (n=3 equity portfolio, max_weight=1.0 for rimv)
+
+| Strategy | Sharpe | Calmar | MDD | Ann Return | Ann Vol |
+|----------|--------|--------|-----|-----------|---------|
+| global_min_var | 0.929 | 0.306 | 21.7% | 6.64% | 7.15% |
+| regime_informed_min_var | 0.860 | 0.303 | 24.0% | 7.29% | 8.48% |
+| equal_weight | 0.840 | 0.302 | 22.7% | 6.84% | 8.15% |
+| regime_mvo | 0.724 | 0.284 | 27.0% | 7.66% | 10.59% |
+
+Gap: 0.069 Sharpe. RTMV earns higher return (7.29% > 6.64%) but higher vol too.
+
+## Phase 44b Results (max_weight=0.60 for rimv — concentration cap)
+
+| Strategy | Sharpe | Calmar | MDD | Ann Return | Ann Vol |
+|----------|--------|--------|-----|-----------|---------|
+| global_min_var | 0.929 | 0.306 | 21.7% | 6.64% | 7.15% |
+| regime_informed_min_var | 0.837 | 0.313 | 23.2% | 7.25% | 8.67% |
+
+Capping max_weight worsened Sharpe (0.860→0.837) and vol also increased (8.48%→8.67%).
+Interpretation: when 2 assets are eligible post-exclusion, a 0.60 cap forces the
+optimizer to spread weight more evenly, sometimes including less-favourable assets.
+Regime exclusion approach is exhausted.
+
+## Phase 45: Regime-Tilted Min-Var (RTMV) — in progress
+
+New approach: convex combination `w = (1-lambda)*w_minvar + lambda*w_regime` where
+`w_regime` is proportional to positive E[r]. At lambda=0: exact global_min_var.
+
 ## Next Steps
 
-1. **Run Phase 37 validation on SPY daily** (`configs/spy_daily.yaml`) — done if
-   period robustness ARI ≥ 0.40 and random-baseline margin > 0.30.
-2. **If SPY passes Phase 37**: design an improved multi-asset portfolio strategy
-   that uses soft regime weights rather than binary on/off allocation.
-3. **If SPY fails Phase 37**: the options/vol forecasting direction is next
-   (regime labels as implied-vol forecast input; ARI=0.742 on BTC confirms
-   the engine finds stable structure, explore whether the same holds for SPY).
+1. **Phase 45**: run lambda grid [0.05, 0.10, 0.20, 0.30, 0.50] on SPY/GLD/TLT/IEF.
+   Goal: find lambda where Sharpe stays ≥ 0.929 while MDD improves.
+2. **Vol forecasting quality test** (Phase 46): direct MSE comparison HMM vol forecast
+   vs EWMA/historical baselines at h=5/10/21 bar horizons.
+3. **Options/implied vol** (Phase 47): if Phase 46 shows HMM vol forecast accuracy,
+   apply to VIX-timing or delta-hedging strategies.
 
 ---
 

@@ -162,10 +162,14 @@ from rde.analysis.regime_concordance import (
 from rde.analysis.multi_asset_allocation import (
     MultiAssetConfig,
     MultiAssetResult,
+    collect_rtmv_rebalance_cache,
     compare_allocations,
+    compute_rtmv_weights_now,
     equal_weight_baseline,
     global_min_var_baseline,
     regime_informed_min_var,
+    regime_tilted_min_var,
+    regime_tilted_min_var_from_cache,
     run_multi_asset_allocation,
 )
 
@@ -314,7 +318,12 @@ __all__ = [
     "MultiAssetResult",
     "run_multi_asset_allocation",
     "regime_informed_min_var",
+    "regime_tilted_min_var",
+    "collect_rtmv_rebalance_cache",
+    "regime_tilted_min_var_from_cache",
     "equal_weight_baseline",
     "global_min_var_baseline",
     "compare_allocations",
+    # Phase 48 — live weight computation
+    "compute_rtmv_weights_now",
 ]

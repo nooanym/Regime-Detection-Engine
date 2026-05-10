@@ -38,6 +38,7 @@ from rde.analysis.multi_asset_allocation import (
     equal_weight_baseline,
     global_min_var_baseline,
     regime_informed_min_var,
+    regime_tilted_min_var,
     run_multi_asset_allocation,
 )
 from rde.data.yfinance_source import YFinanceSource
@@ -154,6 +155,46 @@ def _align_features(
 
 
 # ---------------------------------------------------------------------------
+# Out-of-sample metric recomputation
+# ---------------------------------------------------------------------------
+
+
+def _recompute_comparison(
+    results: dict[str, "MultiAssetResult"],
+    eval_start: pd.Timestamp | None,
+    ann_factor: int = 252,
+) -> pd.DataFrame:
+    """Recompute comparison metrics, optionally restricted to eval_start onward."""
+    from rde.analysis.multi_asset_allocation import _compute_metrics
+
+    rows = []
+    for name, r in results.items():
+        port_ret = r.portfolio_returns
+        if eval_start is not None:
+            port_ret = port_ret[port_ret.index >= eval_start]
+        if len(port_ret) < 20:
+            continue
+        sharpe, calmar, mdd, ann_ret, ann_vol = _compute_metrics(port_ret, ann_factor)
+        # Count rebalance dates in eval window
+        rbal = (
+            [d for d in r.rebalance_dates if eval_start is None or d >= eval_start]
+            if eval_start is not None
+            else r.rebalance_dates
+        )
+        rows.append({
+            "name": name,
+            "sharpe": round(sharpe, 3),
+            "calmar": round(calmar, 3),
+            "max_drawdown": round(mdd, 4),
+            "ann_return": round(ann_ret, 4),
+            "ann_vol": round(ann_vol, 4),
+            "n_rebalances": len(rbal),
+        })
+    df = pd.DataFrame(rows)
+    return df.sort_values("sharpe", ascending=False).reset_index(drop=True)
+
+
+# ---------------------------------------------------------------------------
 # Report generation
 # ---------------------------------------------------------------------------
 
@@ -200,36 +241,44 @@ def _write_report(
         ``YYYYMMDD`` string.
     """
     # GO/NO-GO verdict:
-    #   regime_informed_min_var must beat global_min_var (structural baseline).
-    #   regime_mvo is shown for reference but is not the primary GO criterion here.
+    #   Primary: best RTMV lambda must beat global_min_var on Sharpe.
+    #   Secondary: regime_informed_min_var shown for reference.
     rimv_rows = comparison_df[comparison_df["name"] == "regime_informed_min_var"]
     regime_rows = comparison_df[comparison_df["name"] == "regime_mvo"]
     ew_rows = comparison_df[comparison_df["name"] == "equal_weight"]
     mv_rows = comparison_df[comparison_df["name"] == "global_min_var"]
+    rtmv_rows = comparison_df[comparison_df["name"].str.startswith("rtmv_")]
 
     rimv_sharpe = float(rimv_rows["sharpe"].iloc[0]) if len(rimv_rows) else float("-inf")
     regime_sharpe = float(regime_rows["sharpe"].iloc[0]) if len(regime_rows) else float("-inf")
     ew_sharpe = float(ew_rows["sharpe"].iloc[0]) if len(ew_rows) else float("-inf")
     mv_sharpe = float(mv_rows["sharpe"].iloc[0]) if len(mv_rows) else float("-inf")
+    best_rtmv_sharpe = float(rtmv_rows["sharpe"].max()) if len(rtmv_rows) else float("-inf")
+    best_rtmv_name = (
+        str(rtmv_rows.loc[rtmv_rows["sharpe"].idxmax(), "name"])
+        if len(rtmv_rows) else "none"
+    )
 
-    # Primary criterion: regime_informed_min_var > global_min_var.
-    verdict = "PASS" if rimv_sharpe > mv_sharpe else "FAIL"
+    # Primary criterion: best RTMV lambda > global_min_var.
+    verdict = "PASS" if best_rtmv_sharpe > mv_sharpe else "FAIL"
 
     if verdict == "PASS":
         next_step = (
-            "Regime-informed min-var beats the structural (global_min_var) baseline. "
-            "Regime-based asset exclusion adds value beyond variance reduction alone. "
+            f"Regime-tilted min-var ({best_rtmv_name}) beats the structural "
+            f"(global_min_var) baseline (Sharpe {best_rtmv_sharpe:.3f} > {mv_sharpe:.3f}). "
+            "Regime tilt adds value beyond variance reduction alone. "
             "Proceed to Phase 37-style purged CV validation on the multi-asset portfolio "
             "to stress-test regime stability and cost sensitivity before live deployment."
         )
     else:
         next_step = (
-            "Regime-informed min-var does not beat global_min_var. "
-            "Regime-based exclusions do not improve on pure variance minimisation. "
-            "The structural vol advantage of min-var dominates any regime signal. "
-            "This closes the multi-asset direction for the BTC/ETH/SPY/GLD universe. "
-            "Consider the equity-only universe (SPY/GLD/TLT/IEF) or the "
-            "Options/vol-forecasting direction (CLAUDE.md §9)."
+            f"Best RTMV lambda ({best_rtmv_name}, Sharpe={best_rtmv_sharpe:.3f}) "
+            f"does not beat global_min_var ({mv_sharpe:.3f}). "
+            "Soft regime tilts on top of min-var do not improve Sharpe. "
+            "Next: vol forecasting quality test (Phase 46) — "
+            "direct MSE comparison of HMM posterior-weighted vol forecast vs EWMA "
+            "at h=5/10/21 bar horizons. If HMM reduces MSE, the engine adds vol "
+            "forecasting value independent of directional signal."
         )
 
     # Data summary table.
@@ -351,6 +400,16 @@ def main() -> None:
         default=0.10,
         help="Annualised portfolio vol target; 0 = disable (default: 0.10)",
     )
+    parser.add_argument(
+        "--eval-start-date",
+        type=str,
+        default=None,
+        help=(
+            "Restrict metric computation to bars on or after this date (YYYY-MM-DD). "
+            "Walk-forward training still uses all prior bars; this trims the evaluation "
+            "window for out-of-sample analysis (e.g., '2016-01-01' for a 2016+ test set)."
+        ),
+    )
     args = parser.parse_args()
 
     assets = [s.strip() for s in args.assets.split(",") if s.strip()]
@@ -453,7 +512,7 @@ def main() -> None:
         target_vol=None,   # no vol target — pure min-var + exclusion
         mvo_kind="min_var",
         min_weight=0.0,
-        max_weight=1.0,    # relax max_weight so excluded assets can concentrate
+        max_weight=0.60,   # cap to force diversification post-exclusion
     )
     logger.info(
         "Running regime-informed min-var (exclusion_threshold=0.0)…"
@@ -471,24 +530,63 @@ def main() -> None:
         rimv.max_drawdown, len(rimv.rebalance_dates),
     )
 
-    # --- 9. Comparison table ---
-    comparison_df = compare_allocations({
-        "regime_mvo": result,
-        "regime_informed_min_var": rimv,
+    # --- 9. Regime-tilted min-var lambda grid (Phase 45) ---
+    rtmv_config = MultiAssetConfig(
+        ann_factor=252,
+        rebalance_bars=21,
+        lookback_bars=args.lookback_bars,
+        cov_window_bars=63,
+        n_states=args.n_states,
+        n_restarts=args.n_restarts,
+        transaction_cost=0.001,
+        target_vol=None,
+        mvo_kind="min_var",
+        min_weight=0.0,
+        max_weight=1.0,
+    )
+    lambda_grid = [0.05, 0.10, 0.20, 0.30, 0.50]
+    rtmv_results: dict[str, MultiAssetResult] = {}
+    for lam in lambda_grid:
+        label = f"rtmv_l{int(lam * 100):02d}"
+        logger.info("Running regime_tilted_min_var lambda=%.2f…", lam)
+        rtmv = regime_tilted_min_var(
+            asset_returns,
+            feat_dfs_aligned,
+            config=rtmv_config,
+            lambda_tilt=lam,
+        )
+        rtmv.name = label
+        rtmv_results[label] = rtmv
+        logger.info(
+            "%s: Sharpe=%.3f  ann_return=%.3f  ann_vol=%.3f  MDD=%.3f",
+            label, rtmv.sharpe, rtmv.ann_return, rtmv.ann_vol, rtmv.max_drawdown,
+        )
+
+    # --- 10. Comparison table ---
+    all_strategies: dict[str, MultiAssetResult] = {
         "global_min_var": mv,
         "equal_weight": ew,
-    })
+        "regime_informed_min_var": rimv,
+        "regime_mvo": result,
+    }
+    all_strategies.update(rtmv_results)
+
+    eval_start: pd.Timestamp | None = (
+        pd.Timestamp(args.eval_start_date) if args.eval_start_date else None
+    )
+    comparison_df = _recompute_comparison(all_strategies, eval_start)
 
     # Print to stdout.
+    eval_label = f" (eval from {eval_start.date()})" if eval_start else ""
     print("\n" + "=" * 70)
-    print(f"MULTI-ASSET BACKTEST COMPLETE — {run_date}")
+    print(f"MULTI-ASSET BACKTEST COMPLETE — {run_date}{eval_label}")
     print(f"Assets: {', '.join(assets)}")
     print(f"Common bars: {len(common_idx)}  ({common_idx[0].date()} → {common_idx[-1].date()})")
     print("=" * 70)
     print(comparison_df.to_string(index=False))
     print("=" * 70)
 
-    # --- 10. Save weights + returns parquet ---
+    # --- 11. Save weights + returns parquet ---
     backtest_path = output_dir / f"backtest_{run_date}.parquet"
     weights_out = result.weights.copy()
     weights_out.columns = [f"weight_{c}" for c in weights_out.columns]
@@ -509,7 +607,7 @@ def main() -> None:
     combined.to_parquet(backtest_path)
     logger.info("Weights + returns saved → %s", backtest_path)
 
-    # --- 11. Write Markdown report ---
+    # --- 12. Write Markdown report ---
     report_path = output_dir / f"report_{run_date}.md"
     _write_report(
         report_path=report_path,

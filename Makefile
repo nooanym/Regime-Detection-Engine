@@ -1,4 +1,4 @@
-.PHONY: test test-all test-slow lint format validate-daily validate-hourly run-btc dashboard clean help
+.PHONY: test test-all test-slow lint format validate-daily validate-hourly validate-rtmv backtest-rtmv run-btc dashboard clean help
 
 # ── Test targets ──────────────────────────────────────────────────────────────
 
@@ -66,6 +66,49 @@ validate-daily-fast:
 		--n-sims 20 \
 		--n-permutations 3
 
+validate-rtmv:
+	uv run python scripts/run_rtmv_cv_validation.py \
+		--assets SPY,GLD,TLT,IEF \
+		--n-states 3 \
+		--n-restarts 3 \
+		--lookback-bars 504 \
+		--lambda-tilt 0.30 \
+		--n-folds 5 \
+		--n-shuffle 100
+
+validate-rtmv-fast:
+	uv run python scripts/run_rtmv_cv_validation.py \
+		--assets SPY,GLD,TLT,IEF \
+		--n-states 3 \
+		--n-restarts 1 \
+		--lookback-bars 504 \
+		--lambda-tilt 0.30 \
+		--n-folds 5 \
+		--n-shuffle 10
+
+# ── Phase 48 live rebalancer ─────────────────────────────────────────────────
+
+backtest-rtmv:
+	uv run python scripts/run_rtmv_live.py \
+		--assets SPY,GLD,TLT,IEF \
+		--lambda-tilt 0.05 \
+		--n-states 3 \
+		--n-restarts 3 \
+		--lookback-bars 504 \
+		--rebalance-bars 21 \
+		--output-dir results/rtmv_live \
+		--mode backtest
+
+live-rtmv:
+	uv run python scripts/run_rtmv_live.py \
+		--assets SPY,GLD,TLT,IEF \
+		--lambda-tilt 0.05 \
+		--n-states 3 \
+		--n-restarts 3 \
+		--output-dir results/rtmv_live \
+		--mode live \
+		--poll-interval 3600
+
 # ── Engine runs ───────────────────────────────────────────────────────────────
 
 run-btc:
@@ -113,6 +156,10 @@ help:
 	@echo "    make validate-daily     Full Phase 37 validation on BTC daily (ann=252)"
 	@echo "    make validate-hourly    Full Phase 37 validation on BTC hourly (ann=8760)"
 	@echo "    make validate-daily-fast  Same but n_restarts=1, n_sims=20 for quick checks"
+	@echo "    make validate-rtmv      Phase 47 RTMV purged CV (fold/cost/shuffle)"
+	@echo "    make validate-rtmv-fast  Same but n_restarts=1, n_shuffle=10 for quick checks"
+	@echo "    make backtest-rtmv      Phase 48 RTMV backtest (SPY/GLD/TLT/IEF, λ=0.05)"
+	@echo "    make live-rtmv          Phase 48 RTMV live paper trading (polls hourly)"
 	@echo ""
 	@echo "  Engine"
 	@echo "    make run-btc            rde run on BTC"
