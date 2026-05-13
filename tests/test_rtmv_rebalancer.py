@@ -589,3 +589,92 @@ class TestAdaptiveLambda:
                 lambda_min=0.20,
                 lambda_max=0.10,
             )
+
+
+# ---------------------------------------------------------------------------
+# Phase 51: Regime-Conditional Lambda
+# ---------------------------------------------------------------------------
+
+
+class TestRegimeConditionalLambda:
+    """Tests for lambda_by_state_rank in compute_rtmv_weights_now."""
+
+    def test_weights_sum_to_one(self) -> None:
+        asset_returns, asset_features = _make_asset_data(n_bars=60, n_assets=4)
+        cfg = MultiAssetConfig(n_states=3, n_restarts=1, cov_window_bars=40)
+        w = compute_rtmv_weights_now(
+            asset_returns,
+            asset_features,
+            config=cfg,
+            lambda_by_state_rank=[0.02, 0.05, 0.10],
+        )
+        assert abs(sum(w.values()) - 1.0) < 1e-6
+
+    def test_all_weights_non_negative(self) -> None:
+        asset_returns, asset_features = _make_asset_data(n_bars=60, n_assets=4)
+        cfg = MultiAssetConfig(n_states=3, n_restarts=1, cov_window_bars=40)
+        w = compute_rtmv_weights_now(
+            asset_returns,
+            asset_features,
+            config=cfg,
+            lambda_by_state_rank=[0.02, 0.05, 0.10],
+        )
+        assert all(v >= 0.0 for v in w.values())
+
+    def test_wrong_length_raises(self) -> None:
+        asset_returns, asset_features = _make_asset_data(n_bars=60, n_assets=4)
+        cfg = MultiAssetConfig(n_states=3, n_restarts=1, cov_window_bars=40)
+        with pytest.raises(ValueError, match="lambda_by_state_rank length"):
+            compute_rtmv_weights_now(
+                asset_returns,
+                asset_features,
+                config=cfg,
+                lambda_by_state_rank=[0.02, 0.10],  # length 2, need 3
+            )
+
+    def test_invalid_value_raises(self) -> None:
+        asset_returns, asset_features = _make_asset_data(n_bars=60, n_assets=4)
+        cfg = MultiAssetConfig(n_states=3, n_restarts=1, cov_window_bars=40)
+        with pytest.raises(ValueError, match="lambda_by_state_rank values"):
+            compute_rtmv_weights_now(
+                asset_returns,
+                asset_features,
+                config=cfg,
+                lambda_by_state_rank=[0.02, 0.05, 1.5],  # 1.5 > 1.0
+            )
+
+    def test_bear_schedule_differs_from_bull_schedule(self) -> None:
+        """rank_bear and rank_bull should produce different weights."""
+        asset_returns, asset_features = _make_asset_data(n_bars=60, n_assets=4, seed=7)
+        cfg = MultiAssetConfig(n_states=3, n_restarts=1, cov_window_bars=40)
+        w_bear = compute_rtmv_weights_now(
+            asset_returns, asset_features, config=cfg,
+            lambda_by_state_rank=[0.10, 0.05, 0.02],
+        )
+        w_bull = compute_rtmv_weights_now(
+            asset_returns, asset_features, config=cfg,
+            lambda_by_state_rank=[0.02, 0.05, 0.10],
+        )
+        diffs = [abs(w_bear[a] - w_bull[a]) for a in w_bear]
+        assert max(diffs) > 1e-9, "Bear and bull schedules produced identical weights"
+
+    def test_rebalancer_config_stores_schedule(self) -> None:
+        schedule = [0.02, 0.05, 0.10]
+        cfg = RTMVRebalancerConfig(lambda_by_state_rank=schedule)
+        assert cfg.lambda_by_state_rank == schedule
+
+    def test_rebalancer_backtest_completes_with_schedule(self) -> None:
+        asset_returns, asset_features = _make_asset_data(n_bars=100, n_assets=4)
+        cfg = RTMVRebalancerConfig(
+            assets=[f"A{i}" for i in range(4)],
+            lambda_by_state_rank=[0.02, 0.05, 0.10],
+            n_states=3,
+            n_restarts=1,
+            lookback_bars=60,
+            rebalance_bars=21,
+            drawdown_halt=0.25,
+        )
+        rebalancer = RTMVRebalancer(cfg)
+        snaps = rebalancer.run_backtest(asset_returns, asset_features)
+        assert len(snaps) == 100
+        assert snaps["equity"].iloc[-1] > 0

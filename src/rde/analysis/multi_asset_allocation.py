@@ -1003,6 +1003,7 @@ def compute_rtmv_weights_now(
     lambda_min: float = 0.02,
     lambda_max: float = 0.15,
     return_posteriors: bool = False,
+    lambda_by_state_rank: list[float] | None = None,
 ) -> dict[str, float] | tuple[dict[str, float], dict[str, np.ndarray]]:
     """Compute RTMV target weights from a fixed-length lookback window.
 
@@ -1039,6 +1040,13 @@ def compute_rtmv_weights_now(
         (shape ``(n_states,)`` each). Used by posterior-triggered rebalancers
         (Phase 50b) to compute KL divergence between rebalances.  Assets where
         HMM fitting failed map to a uniform posterior.
+    lambda_by_state_rank : list[float], optional
+        Regime-conditional λ schedule (Phase 51).  Length must equal
+        ``config.n_states``.  Element ``k`` is the λ to use when the
+        portfolio-level dominant state has return rank ``k`` (rank 0 =
+        lowest mean-return state, rank n_states-1 = highest).  The
+        portfolio-level rank is the mean of per-asset dominant-state ranks.
+        Overrides ``lambda_tilt`` and ``adaptive_lambda`` when provided.
 
     Returns
     -------
@@ -1061,6 +1069,14 @@ def compute_rtmv_weights_now(
     if adaptive_lambda:
         if not (0.0 <= lambda_min <= lambda_max <= 1.0):
             raise ValueError("Require 0 <= lambda_min <= lambda_max <= 1.")
+    if lambda_by_state_rank is not None:
+        if len(lambda_by_state_rank) != (config or MultiAssetConfig()).n_states:
+            raise ValueError(
+                f"lambda_by_state_rank length ({len(lambda_by_state_rank)}) "
+                f"must equal n_states ({(config or MultiAssetConfig()).n_states})."
+            )
+        if not all(0.0 <= v <= 1.0 for v in lambda_by_state_rank):
+            raise ValueError("All lambda_by_state_rank values must be in [0, 1].")
 
     ret_arr = asset_returns_window.values.astype(float)
     uniform_post = np.ones(cfg.n_states) / cfg.n_states
@@ -1086,6 +1102,7 @@ def compute_rtmv_weights_now(
     exp_returns = np.zeros(N)
     last_posteriors: list[np.ndarray] = []
     posteriors_per_asset: dict[str, np.ndarray] = {a: uniform_post.copy() for a in assets}
+    dominant_state_ranks: list[int] = []  # per-asset dominant state return rank
     for i, asset in enumerate(assets):
         feat_df = asset_features_window.get(asset)
         if feat_df is None or len(feat_df) < cfg.n_states * 2:
@@ -1111,11 +1128,25 @@ def compute_rtmv_weights_now(
             means_scaled = decoder._model.means_
             means_orig = decoder._scaler.inverse_transform(means_scaled)
             exp_returns[i] = float(posteriors[-1] @ means_orig[:, lr_idx])
+
+            # Regime-conditional λ: record the return rank of the dominant state.
+            if lambda_by_state_rank is not None:
+                state_means = means_orig[:, lr_idx]  # (K,) mean log-return per state
+                dominant_state = int(np.argmax(posteriors[-1]))
+                # rank = position of dominant_state when states sorted by mean return
+                rank = int(np.argsort(state_means).tolist().index(dominant_state))
+                dominant_state_ranks.append(rank)
         except Exception as exc:
             logger.warning("HMM fit failed for %s: %s", asset, exc)
 
     # Determine effective lambda.
-    if adaptive_lambda and last_posteriors:
+    if lambda_by_state_rank is not None and dominant_state_ranks:
+        # Portfolio-level dominant rank = mean across assets, rounded to nearest int.
+        mean_rank = float(np.mean(dominant_state_ranks))
+        portfolio_rank = int(round(mean_rank))
+        portfolio_rank = max(0, min(portfolio_rank, len(lambda_by_state_rank) - 1))
+        lambda_effective = lambda_by_state_rank[portfolio_rank]
+    elif adaptive_lambda and last_posteriors:
         H_max = float(np.log(cfg.n_states)) if cfg.n_states > 1 else 1.0
         entropies = []
         for p in last_posteriors:

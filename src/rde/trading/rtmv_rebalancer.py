@@ -94,6 +94,7 @@ class RTMVRebalancerConfig:
     lambda_min: float = 0.02
     lambda_max: float = 0.15
     rebalance_kl_threshold: float = 0.0
+    lambda_by_state_rank: list[float] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +141,7 @@ class RTMVRebalancerState:
     snapshots: list[dict] = field(default_factory=list)
     posterior_at_last_rebalance: dict = field(default_factory=dict)
     n_kl_rebalances: int = 0
+    last_lambda_effective: float = 0.05
 
 
 # ---------------------------------------------------------------------------
@@ -165,6 +167,7 @@ class RTMVRebalancer:
         config: RTMVRebalancerConfig | None = None,
         ma_config=None,
         train_kwargs: dict | None = None,
+        supabase_writer=None,
     ) -> None:
         from rde.analysis.multi_asset_allocation import MultiAssetConfig
         from rde.trading.multi_asset_portfolio import (
@@ -210,6 +213,7 @@ class RTMVRebalancer:
             a: pd.DataFrame() for a in self.config.assets
         }
         self._bars_since_rebalance: int = 0
+        self._supabase = supabase_writer  # SupabaseWriter | None
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -348,6 +352,7 @@ class RTMVRebalancer:
                 lambda_min=self.config.lambda_min,
                 lambda_max=self.config.lambda_max,
                 return_posteriors=True,
+                lambda_by_state_rank=self.config.lambda_by_state_rank or None,
             )
             mean_kl = self._mean_posterior_kl(current_posteriors)
             if mean_kl > self.config.rebalance_kl_threshold:
@@ -372,6 +377,7 @@ class RTMVRebalancer:
                 lambda_min=self.config.lambda_min,
                 lambda_max=self.config.lambda_max,
                 return_posteriors=need_posteriors,
+                lambda_by_state_rank=self.config.lambda_by_state_rank or None,
             )
             if need_posteriors:
                 target_weights, current_posteriors = result
@@ -380,12 +386,28 @@ class RTMVRebalancer:
                 target_weights = result
 
         if target_weights is not None:
-            self.portfolio.set_target_weights(target_weights, prices, date)
+            new_fills = self.portfolio.set_target_weights(target_weights, prices, date)
             self._bars_since_rebalance = 0
             self.state.n_rebalances += 1
             if triggered_by_kl:
                 self.state.n_kl_rebalances += 1
             self.state.current_weights = dict(target_weights)
+            self.state.last_lambda_effective = self.config.lambda_tilt
+
+            if self._supabase is not None and new_fills:
+                fills_rows = [
+                    {
+                        "fill_at": f.timestamp.isoformat() if hasattr(f.timestamp, "isoformat") else str(f.timestamp),
+                        "asset": f.asset,
+                        "side": f.side,
+                        "quantity": round(float(f.quantity), 6),
+                        "price": round(float(f.price), 6),
+                        "slippage": round(float(f.slippage), 6),
+                        "notional": round(float(f.notional), 4),
+                    }
+                    for f in new_fills
+                ]
+                self._supabase.write_fills(fills_rows)
 
             eq = self.portfolio.equity(prices)
             self.state.equity = eq
@@ -401,17 +423,33 @@ class RTMVRebalancer:
                 eq,
             )
 
-        self.state.snapshots.append(
-            self.portfolio.snapshot(date, prices, target_weights)
-            | {
-                "n_rebalances": self.state.n_rebalances,
-                "drawdown": self._current_drawdown(),
-                "is_halted": self.state.is_halted,
-                "rebalance": target_weights is not None,
-                "kl_triggered": triggered_by_kl,
-                "mean_kl": mean_kl if mean_kl is not None else float("nan"),
-            }
-        )
+        snap = self.portfolio.snapshot(date, prices, target_weights) | {
+            "n_rebalances": self.state.n_rebalances,
+            "drawdown": self._current_drawdown(),
+            "is_halted": self.state.is_halted,
+            "rebalance": target_weights is not None,
+            "kl_triggered": triggered_by_kl,
+            "mean_kl": mean_kl if mean_kl is not None else float("nan"),
+        }
+        self.state.snapshots.append(snap)
+
+        # Optional Supabase write (no-op if writer is None or disabled).
+        if self._supabase is not None:
+            bar_date = date.date() if hasattr(date, "date") else date
+            weight_cols = {k[len("weight_"):]: v for k, v in snap.items() if k.startswith("weight_")}
+            target_cols = {k[len("target_"):]: v for k, v in snap.items() if k.startswith("target_")}
+            self._supabase.write_snapshot(
+                bar_date=bar_date,
+                equity=float(snap.get("equity", 0.0)),
+                cash=float(snap.get("cash", 0.0)),
+                drawdown=float(snap.get("drawdown", 0.0)),
+                peak_equity=float(self.state.peak_equity),
+                is_halted=bool(self.state.is_halted),
+                rebalanced=target_weights is not None,
+                n_rebalances=int(self.state.n_rebalances),
+                weights=weight_cols,
+                target_weights=target_cols or None,
+            )
 
         return self.state.equity
 
@@ -494,7 +532,18 @@ class RTMVRebalancer:
 
             self.step(date, prices, returns_row, features_rows)
 
-        return self.snapshots_df()
+        snaps = self.snapshots_df()
+        if self._supabase is not None and not snaps.empty:
+            eq = snaps["equity"].dropna()
+            ret = eq.pct_change().dropna()
+            ann = 252
+            mu = float(ret.mean()) * ann
+            sig = float(ret.std()) * (ann ** 0.5) + 1e-15
+            sharpe = mu / sig
+            peak = eq.cummax()
+            mdd = float(((eq - peak) / (peak + 1e-15)).min())
+            self._supabase.finalize_run(sharpe, mdd, float(eq.iloc[-1]))
+        return snaps
 
     # ------------------------------------------------------------------
     # Live polling mode
