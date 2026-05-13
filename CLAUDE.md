@@ -502,7 +502,7 @@ uv run pytest tests/test_smoke_btc.py
 
 ---
 
-## 9. Current state (as of Phase 49)
+## 9. Current state (as of Phase 50)
 
 **Phases 0–36 are complete on `main`, plus the post-Phase-36 audit branch (`audit/post-phase-36-improvements`).** 1297 tests passing. The system now includes a full live paper-trading loop with risk guard protection and a complete Streamlit dashboard.
 
@@ -571,6 +571,7 @@ uv run pytest tests/test_smoke_btc.py
 | 47 | `scripts/run_rtmv_cv_validation.py`, `docs/findings/phase47_rtmv_cv_decision_memo.md` | **CONDITIONAL GO** (λ=0.05): fold-consistency PASS (3/5=60%), cost break-even PASS (80.6 bps >> 20 bps min), shuffle FAIL (p=0.130, margin +0.012 — real beats shuffle mean but 13% of shuffles beat real). λ=0.30 fails all 3 tests (wrong period). Signal is real but small (+0.005 Sharpe over GMV). See `docs/findings/phase47_rtmv_cv_decision_memo.md`. |
 | 48 | `analysis/multi_asset_allocation.py` (`compute_rtmv_weights_now`), `trading/multi_asset_portfolio.py`, `trading/rtmv_rebalancer.py`, `scripts/run_rtmv_live.py` | Live deployment skeleton: `compute_rtmv_weights_now` (single-step live weight computation from a lookback window), `MultiAssetPortfolio` (N-position paper portfolio with weight-based rebalance + fills), `RTMVRebalancer` (daily-polling monthly-rebalancing loop with drawdown halt, backtest mode, live polling mode), `run_rtmv_live.py` (backtest: `--mode backtest`, live: `--mode live`). 25 new tests. Backtest result: Sharpe=0.875, MDD=−21.5%, Ann Return=6.4%, N Rebalances=212. |
 | 49 | `app/panels_rtmv.py`, `app/streamlit_app.py` | RTMV Portfolio Monitoring dashboard panel: equity+drawdown subplot, stacked area weight trajectory, recent fills table (last 50), 6 summary metrics (equity, Sharpe, MDD, ann return, N rebalances, status). Reads `results/rtmv_live/snapshots.parquet` and `fills.parquet`. 14 new tests in `tests/test_panels_rtmv.py`. |
+| 50 | `trading/rtmv_rebalancer.py`, `evaluation/baselines.py`, `docs/findings/phase50*.md` | Three-quant parameter study. **50a** adaptive λ NO-GO (−0.003 Sharpe; n=3 posteriors too concentrated). **50b** KL-triggered rebalance NO-GO (fires on 87% of bars; HMM refit window drift dominates KL signal). **50c** two GOs: halt=20% raised to 25% (+0.027 Sharpe, natural MDD is 21.5% so 20% was premature); RTMV beats risk parity baseline (+0.021 Sharpe, +0.035 Calmar, −1.1pp MDD). 1535 tests. |
 
 ### Full pipeline (paper trading)
 
@@ -651,20 +652,25 @@ weakness. **Phase 37 purged CV validation on SPY daily is running.**
 - Shuffle robustness: p=0.130 (criterion <0.10, margin +0.012) — FAIL (marginal; n=100 shuffles may be insufficient)
 - λ=0.30 is NOT the right lambda for full-period — it fails all 3 tests (selected on 2016–2026 only)
 
-**Phase 49 COMPLETE — RTMV Portfolio Monitoring dashboard panel built.** ~1519 tests passing.
+**Phase 50 COMPLETE — parameter study complete.** 1535 tests passing.
 
-Run the paper backtest and launch dashboard:
+Phase 50 key results:
+- Halt threshold raised 20% → 25%: Sharpe improves 0.876 → **0.903** (natural MDD is 21.5%; 20% was premature)
+- RTMV beats risk parity: Sharpe +0.021, Calmar +0.035, MDD −1.1pp
+- Adaptive λ and KL-triggered rebalance both NO-GO
+
+Run the updated backtest and launch dashboard:
 ```bash
 make backtest-rtmv          # SPY/GLD/TLT/IEF backtest → results/rtmv_live/
 make dashboard              # Streamlit dashboard with RTMV Portfolio panel
 ```
 Switch to live polling:
 ```bash
-make live-rtmv              # polls yfinance every 3600s, rebalances monthly
+make live-rtmv              # polls yfinance every 3600s, rebalances monthly (halt=25%)
 ```
 
 **Confirmed next direction:**
-→ Run `make live-rtmv` to begin live paper trading (poll daily, rebalance monthly). Monitor for 1–3 months to collect real execution data and validate that live Sharpe tracks backtest (0.875). Watch for drawdown halt triggers (20% threshold).
+→ Run `make live-rtmv` to begin live paper trading. Monitor for 1–3 months. Target live Sharpe ≈ 0.903. Drawdown halt now at 25% — will only trigger in tail scenarios (2008-style). Next research directions: (1) online-posterior KL monitor (decouple trigger from refit); (2) regime-conditional λ keyed on dominant state identity rather than entropy; (3) universe expansion beyond SPY/GLD/TLT/IEF.
 
 The Notion roadmap and tasks database are the source of truth for sequencing. Update Notion as work progresses.
 
