@@ -87,7 +87,7 @@ class RTMVRebalancerConfig:
     n_restarts: int = 3
     initial_capital: float = 100_000.0
     slippage_bps: float = 5.0
-    drawdown_halt: float = 0.20
+    drawdown_halt: float = 0.25
     poll_interval_s: float = 3600.0
     output_dir: Path = Path("results/rtmv_live")
     adaptive_lambda: bool = False
