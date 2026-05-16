@@ -95,6 +95,7 @@ class RTMVRebalancerConfig:
     lambda_max: float = 0.15
     rebalance_kl_threshold: float = 0.0
     lambda_by_state_rank: list[float] = field(default_factory=list)
+    lambda_proxy_asset: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -353,6 +354,7 @@ class RTMVRebalancer:
                 lambda_max=self.config.lambda_max,
                 return_posteriors=True,
                 lambda_by_state_rank=self.config.lambda_by_state_rank or None,
+                lambda_proxy_asset=self.config.lambda_proxy_asset,
             )
             mean_kl = self._mean_posterior_kl(current_posteriors)
             if mean_kl > self.config.rebalance_kl_threshold:
@@ -378,6 +380,7 @@ class RTMVRebalancer:
                 lambda_max=self.config.lambda_max,
                 return_posteriors=need_posteriors,
                 lambda_by_state_rank=self.config.lambda_by_state_rank or None,
+                lambda_proxy_asset=self.config.lambda_proxy_asset,
             )
             if need_posteriors:
                 target_weights, current_posteriors = result

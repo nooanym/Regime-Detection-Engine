@@ -48,12 +48,23 @@ import pandas as pd
 _repo_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_repo_root / "src"))
 
+# Load .env from repo root if present (allows credentials without shell exports).
+_env_file = _repo_root / ".env"
+if _env_file.exists():
+    import os
+    for _line in _env_file.read_text().splitlines():
+        _line = _line.strip()
+        if _line and not _line.startswith("#") and "=" in _line:
+            _k, _v = _line.split("=", 1)
+            os.environ.setdefault(_k.strip(), _v.strip())
+
 from rde.analysis.multi_asset_allocation import MultiAssetConfig
 from rde.data.yfinance_source import YFinanceSource
 from rde.features.pipeline import FeaturePipeline
 from rde.features.returns import LogReturns, SmoothedReturns
 from rde.features.volatility import RollingVolatility
 from rde.trading.rtmv_rebalancer import RTMVRebalancer, RTMVRebalancerConfig
+from rde.trading.supabase_writer import SupabaseWriter, SupabaseWriterConfig
 
 logging.basicConfig(
     level=logging.INFO,
@@ -235,7 +246,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--rebalance-bars", type=int, default=21)
     p.add_argument("--capital", type=float, default=100_000.0)
     p.add_argument("--slippage-bps", type=float, default=5.0)
-    p.add_argument("--drawdown-halt", type=float, default=0.20)
+    p.add_argument("--drawdown-halt", type=float, default=0.25)
     p.add_argument("--output-dir", default="results/rtmv_live")
     p.add_argument("--mode", choices=["backtest", "live"], default="backtest")
     p.add_argument("--poll-interval", type=float, default=3600.0,
@@ -271,7 +282,27 @@ def main() -> None:
         n_states=args.n_states,
         n_restarts=args.n_restarts,
     )
-    rebalancer = RTMVRebalancer(cfg, ma_config=ma_cfg)
+    # Wire Supabase if credentials are present (graceful no-op otherwise).
+    import os
+    run_id = f"rtmv_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}_{args.mode}"
+    sb_writer = SupabaseWriter(
+        SupabaseWriterConfig(
+            run_id=run_id,
+            mode=args.mode,
+            assets=assets,
+            lambda_tilt=args.lambda_tilt,
+            n_states=args.n_states,
+            lookback_bars=args.lookback_bars,
+            rebalance_bars=args.rebalance_bars,
+            drawdown_halt=args.drawdown_halt,
+        )
+    )
+    if sb_writer.enabled:
+        logger.info("Supabase connected — run_id=%s", run_id)
+    else:
+        logger.info("Supabase not configured — parquet-only mode.")
+
+    rebalancer = RTMVRebalancer(cfg, ma_config=ma_cfg, supabase_writer=sb_writer)
 
     if args.mode == "live":
         rebalancer.run_forever()

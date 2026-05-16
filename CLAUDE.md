@@ -502,7 +502,7 @@ uv run pytest tests/test_smoke_btc.py
 
 ---
 
-## 9. Current state (as of Phase 50)
+## 9. Current state (as of Phase 51b)
 
 **Phases 0–36 are complete on `main`, plus the post-Phase-36 audit branch (`audit/post-phase-36-improvements`).** 1297 tests passing. The system now includes a full live paper-trading loop with risk guard protection and a complete Streamlit dashboard.
 
@@ -572,6 +572,8 @@ uv run pytest tests/test_smoke_btc.py
 | 48 | `analysis/multi_asset_allocation.py` (`compute_rtmv_weights_now`), `trading/multi_asset_portfolio.py`, `trading/rtmv_rebalancer.py`, `scripts/run_rtmv_live.py` | Live deployment skeleton: `compute_rtmv_weights_now` (single-step live weight computation from a lookback window), `MultiAssetPortfolio` (N-position paper portfolio with weight-based rebalance + fills), `RTMVRebalancer` (daily-polling monthly-rebalancing loop with drawdown halt, backtest mode, live polling mode), `run_rtmv_live.py` (backtest: `--mode backtest`, live: `--mode live`). 25 new tests. Backtest result: Sharpe=0.875, MDD=−21.5%, Ann Return=6.4%, N Rebalances=212. |
 | 49 | `app/panels_rtmv.py`, `app/streamlit_app.py` | RTMV Portfolio Monitoring dashboard panel: equity+drawdown subplot, stacked area weight trajectory, recent fills table (last 50), 6 summary metrics (equity, Sharpe, MDD, ann return, N rebalances, status). Reads `results/rtmv_live/snapshots.parquet` and `fills.parquet`. 14 new tests in `tests/test_panels_rtmv.py`. |
 | 50 | `trading/rtmv_rebalancer.py`, `evaluation/baselines.py`, `docs/findings/phase50*.md` | Three-quant parameter study. **50a** adaptive λ NO-GO (−0.003 Sharpe; n=3 posteriors too concentrated). **50b** KL-triggered rebalance NO-GO (fires on 87% of bars; HMM refit window drift dominates KL signal). **50c** two GOs: halt=20% raised to 25% (+0.027 Sharpe, natural MDD is 21.5% so 20% was premature); RTMV beats risk parity baseline (+0.021 Sharpe, +0.035 Calmar, −1.1pp MDD). 1535 tests. |
+| 51 | `analysis/multi_asset_allocation.py`, `trading/rtmv_rebalancer.py`, `scripts/compare_lambda_strategies.py` | Regime-conditional λ via per-asset rank averaging. NO-GO: best +0.003 Sharpe (threshold +0.010). Root cause: SPY rank-0 (bear) + TLT rank-2 (bond-bull) cancel → mean rank stays neutral. See `docs/findings/phase51_regime_conditional_lambda.md`. |
+| 51b | `analysis/multi_asset_allocation.py` (`lambda_proxy_asset`), `trading/rtmv_rebalancer.py`, `scripts/compare_lambda_strategies.py` | SPY-proxy λ — use only SPY's dominant state rank to set portfolio λ. `spy_rank_bull=[0.02,0.05,0.10]` **GO: +0.011 Sharpe** (Sharpe=0.8948 vs baseline 0.8838, MDD −0.2pp). 1548 tests. See `docs/findings/phase51b_spy_proxy_lambda.md`. |
 
 ### Full pipeline (paper trading)
 
@@ -669,8 +671,10 @@ Switch to live polling:
 make live-rtmv              # polls yfinance every 3600s, rebalances monthly (halt=25%)
 ```
 
+**Phase 51b GO — spy_rank_bull deployed.** `lambda_by_state_rank=[0.02, 0.05, 0.10]` with `lambda_proxy_asset="SPY"`. Sharpe=0.8948 (+0.011 vs fixed_l05 baseline of 0.8838). Marginal pass — monitor over live paper trading period.
+
 **Confirmed next direction:**
-→ Run `make live-rtmv` to begin live paper trading. Monitor for 1–3 months. Target live Sharpe ≈ 0.903. Drawdown halt now at 25% — will only trigger in tail scenarios (2008-style). Next research directions: (1) online-posterior KL monitor (decouple trigger from refit); (2) regime-conditional λ keyed on dominant state identity rather than entropy; (3) universe expansion beyond SPY/GLD/TLT/IEF.
+→ Run `make live-rtmv` with `lambda_proxy_asset="SPY"` and `lambda_by_state_rank=[0.02,0.05,0.10]` to begin live paper trading. Monitor for 1–3 months. Next research directions: (1) Phase 52a: bond maturity ladder (add SHY+TIP to universe); (2) Phase 53: online-posterior KL monitor using reference posterior (decouple trigger from refit); (3) Phase 54: joint HMM on 4D return vector.
 
 The Notion roadmap and tasks database are the source of truth for sequencing. Update Notion as work progresses.
 

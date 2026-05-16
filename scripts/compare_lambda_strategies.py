@@ -1,18 +1,24 @@
-"""Phase 51: Regime-Conditional λ Comparison.
+"""Phase 51 / 51b: Regime-Conditional λ Comparison.
 
-Runs four RTMV variants on the SPY/GLD/TLT/IEF universe and compares:
-  - fixed_l05   : fixed λ=0.05 (Phase 50 baseline)
-  - fixed_l10   : fixed λ=0.10
-  - rank_bear   : λ_by_rank=[0.10, 0.05, 0.02] — high tilt in bear, low in bull
-  - rank_bull   : λ_by_rank=[0.02, 0.05, 0.10] — low tilt in bear, high in bull
+Phase 51 (multi-asset rank averaging) variants:
+  - fixed_l05        : fixed λ=0.05 (Phase 50 baseline)
+  - fixed_l10        : fixed λ=0.10
+  - rank_bear        : λ_by_rank=[0.10, 0.05, 0.02] — high tilt in bear, low in bull
+  - rank_bull        : λ_by_rank=[0.02, 0.05, 0.10] — low tilt in bear, high in bull
 
-Hypothesis: rank_bull should win (amplify regime tilt when equity momentum is
-strong; reduce to near-min-var in bear markets where the HMM lags).
+Phase 51b (SPY-proxy rank only) variants:
+  - spy_rank_bear    : SPY rank only → [0.10, 0.05, 0.02]
+  - spy_rank_bull    : SPY rank only → [0.02, 0.05, 0.10]
+
+Phase 51 NO-GO root cause: per-asset rank averaging incoherent (SPY bear +
+TLT bull cancel to neutral). Phase 51b fixes this by using only SPY's
+dominant state rank as the portfolio λ signal.
 
 Usage
 -----
     uv run python scripts/compare_lambda_strategies.py
     uv run python scripts/compare_lambda_strategies.py --start-date 2010-01-01
+    uv run python scripts/compare_lambda_strategies.py --phase 51b  # SPY-proxy only
 """
 
 from __future__ import annotations
@@ -112,11 +118,13 @@ def _run_variant(
     asset_features: dict[str, pd.DataFrame],
     lambda_tilt: float = 0.05,
     lambda_by_state_rank: list[float] | None = None,
+    lambda_proxy_asset: str | None = None,
 ) -> dict:
     cfg = RTMVRebalancerConfig(
         assets=assets,
         lambda_tilt=lambda_tilt,
         lambda_by_state_rank=lambda_by_state_rank or [],
+        lambda_proxy_asset=lambda_proxy_asset,
         n_states=3,
         n_restarts=3,
         lookback_bars=504,
@@ -136,24 +144,47 @@ def _run_variant(
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Phase 51: regime-conditional λ comparison")
+    p = argparse.ArgumentParser(description="Phase 51/51b: regime-conditional λ comparison")
     p.add_argument("--assets", default="SPY,GLD,TLT,IEF")
     p.add_argument("--start-date", default=None)
+    p.add_argument("--proxy-asset", default="SPY",
+                   help="Asset whose state rank drives λ for Phase 51b variants")
+    p.add_argument("--phase", default="both", choices=["51", "51b", "both"],
+                   help="Which phase variants to run (default: both)")
     args = p.parse_args()
     assets = [a.strip() for a in args.assets.split(",")]
-    n = len(assets)  # n_states=3 so schedule length must be 3
+    proxy = args.proxy_asset
 
     print(f"\nLoading data for {assets}…")
     asset_returns, asset_features = _load_data(assets, args.start_date)
     print(f"Loaded: {len(asset_returns)} bars  "
           f"({asset_returns.index[0].date()} → {asset_returns.index[-1].date()})\n")
 
-    variants = [
+    phase51_variants = [
         ("fixed_l05",   dict(lambda_tilt=0.05)),
         ("fixed_l10",   dict(lambda_tilt=0.10)),
         ("rank_bear",   dict(lambda_tilt=0.05, lambda_by_state_rank=[0.10, 0.05, 0.02])),
         ("rank_bull",   dict(lambda_tilt=0.05, lambda_by_state_rank=[0.02, 0.05, 0.10])),
     ]
+    phase51b_variants = [
+        (f"spy_rank_bear", dict(
+            lambda_tilt=0.05,
+            lambda_by_state_rank=[0.10, 0.05, 0.02],
+            lambda_proxy_asset=proxy,
+        )),
+        (f"spy_rank_bull", dict(
+            lambda_tilt=0.05,
+            lambda_by_state_rank=[0.02, 0.05, 0.10],
+            lambda_proxy_asset=proxy,
+        )),
+    ]
+
+    if args.phase == "51":
+        variants = phase51_variants
+    elif args.phase == "51b":
+        variants = [phase51_variants[0]] + phase51b_variants  # always include baseline
+    else:
+        variants = phase51_variants + phase51b_variants
 
     results = []
     for name, kwargs in variants:
@@ -163,20 +194,22 @@ def main() -> None:
         print(f"  Sharpe={m['Sharpe']}  MDD={m['MDD']}  Calmar={m['Calmar']}")
 
     # Print comparison table.
+    phase_label = f"PHASE {args.phase.upper()} — REGIME-CONDITIONAL λ COMPARISON"
     print("\n" + "=" * 72)
-    print("PHASE 51 — REGIME-CONDITIONAL λ COMPARISON")
+    print(phase_label)
     print("=" * 72)
     cols = ["variant", "Sharpe", "Calmar", "MDD", "Ann Return", "Ann Vol", "Rebalances"]
-    header = f"{'Variant':<14}" + "".join(f"{c:>12}" for c in cols[1:])
+    header = f"{'Variant':<16}" + "".join(f"{c:>12}" for c in cols[1:])
     print(header)
     print("-" * 72)
     for r in results:
-        row = f"{r['variant']:<14}" + "".join(f"{str(r[c]):>12}" for c in cols[1:])
+        row = f"{r['variant']:<16}" + "".join(f"{str(r[c]):>12}" for c in cols[1:])
         print(row)
     print("=" * 72)
 
     # Save results.
-    out_dir = _repo_root / "results" / "phase51"
+    out_subdir = "phase51b" if args.phase == "51b" else "phase51"
+    out_dir = _repo_root / "results" / out_subdir
     out_dir.mkdir(parents=True, exist_ok=True)
     df = pd.DataFrame(results).set_index("variant")
     csv_path = out_dir / "lambda_comparison.csv"

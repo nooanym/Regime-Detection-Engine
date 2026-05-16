@@ -52,3 +52,7 @@ results/cache/*
 # Coverage
 .coverage
 htmlcov/
+.env
+
+# Deployment prompts containing API keys / project URLs
+docs/lovable_dashboard_prompt.md

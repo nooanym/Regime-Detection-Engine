@@ -1004,6 +1004,7 @@ def compute_rtmv_weights_now(
     lambda_max: float = 0.15,
     return_posteriors: bool = False,
     lambda_by_state_rank: list[float] | None = None,
+    lambda_proxy_asset: str | None = None,
 ) -> dict[str, float] | tuple[dict[str, float], dict[str, np.ndarray]]:
     """Compute RTMV target weights from a fixed-length lookback window.
 
@@ -1041,12 +1042,17 @@ def compute_rtmv_weights_now(
         (Phase 50b) to compute KL divergence between rebalances.  Assets where
         HMM fitting failed map to a uniform posterior.
     lambda_by_state_rank : list[float], optional
-        Regime-conditional λ schedule (Phase 51).  Length must equal
+        Regime-conditional λ schedule (Phase 51/51b).  Length must equal
         ``config.n_states``.  Element ``k`` is the λ to use when the
         portfolio-level dominant state has return rank ``k`` (rank 0 =
-        lowest mean-return state, rank n_states-1 = highest).  The
-        portfolio-level rank is the mean of per-asset dominant-state ranks.
+        lowest mean-return state, rank n_states-1 = highest).
         Overrides ``lambda_tilt`` and ``adaptive_lambda`` when provided.
+    lambda_proxy_asset : str, optional
+        Phase 51b: when set alongside ``lambda_by_state_rank``, use *only*
+        this asset's dominant state rank to select λ (ignores all other
+        assets).  Avoids the Phase 51 averaging problem where SPY rank-0
+        (bear) cancels TLT rank-2 (bond-bull) to produce a neutral signal.
+        Falls back to the full average if the proxy asset's HMM fit fails.
 
     Returns
     -------
@@ -1103,6 +1109,7 @@ def compute_rtmv_weights_now(
     last_posteriors: list[np.ndarray] = []
     posteriors_per_asset: dict[str, np.ndarray] = {a: uniform_post.copy() for a in assets}
     dominant_state_ranks: list[int] = []  # per-asset dominant state return rank
+    proxy_asset_rank: int | None = None   # rank for the proxy asset (Phase 51b)
     for i, asset in enumerate(assets):
         feat_df = asset_features_window.get(asset)
         if feat_df is None or len(feat_df) < cfg.n_states * 2:
@@ -1133,18 +1140,23 @@ def compute_rtmv_weights_now(
             if lambda_by_state_rank is not None:
                 state_means = means_orig[:, lr_idx]  # (K,) mean log-return per state
                 dominant_state = int(np.argmax(posteriors[-1]))
-                # rank = position of dominant_state when states sorted by mean return
                 rank = int(np.argsort(state_means).tolist().index(dominant_state))
                 dominant_state_ranks.append(rank)
+                if lambda_proxy_asset is not None and asset == lambda_proxy_asset:
+                    proxy_asset_rank = rank
         except Exception as exc:
             logger.warning("HMM fit failed for %s: %s", asset, exc)
 
     # Determine effective lambda.
     if lambda_by_state_rank is not None and dominant_state_ranks:
-        # Portfolio-level dominant rank = mean across assets, rounded to nearest int.
-        mean_rank = float(np.mean(dominant_state_ranks))
-        portfolio_rank = int(round(mean_rank))
-        portfolio_rank = max(0, min(portfolio_rank, len(lambda_by_state_rank) - 1))
+        if lambda_proxy_asset is not None and proxy_asset_rank is not None:
+            # Phase 51b: proxy-asset rank only — avoids cross-asset averaging.
+            portfolio_rank = max(0, min(proxy_asset_rank, len(lambda_by_state_rank) - 1))
+        else:
+            # Phase 51 original: mean across all assets (fallback when proxy fails).
+            mean_rank = float(np.mean(dominant_state_ranks))
+            portfolio_rank = int(round(mean_rank))
+            portfolio_rank = max(0, min(portfolio_rank, len(lambda_by_state_rank) - 1))
         lambda_effective = lambda_by_state_rank[portfolio_rank]
     elif adaptive_lambda and last_posteriors:
         H_max = float(np.log(cfg.n_states)) if cfg.n_states > 1 else 1.0

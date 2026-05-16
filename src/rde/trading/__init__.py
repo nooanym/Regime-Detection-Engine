@@ -71,6 +71,7 @@ from rde.trading.alerts import (
     RegimeChangeMonitor,
 )
 from rde.trading.risk_guard import RiskGuard, RiskGuardConfig, RiskGuardState
+from rde.trading.supabase_writer import SupabaseWriter, SupabaseWriterConfig
 
 __all__ = [
     # paper portfolio
@@ -107,4 +108,7 @@ __all__ = [
     "RiskGuard",
     "RiskGuardConfig",
     "RiskGuardState",
+    # Supabase persistence (Phase 51)
+    "SupabaseWriter",
+    "SupabaseWriterConfig",
 ]

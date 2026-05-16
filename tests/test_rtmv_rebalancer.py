@@ -678,3 +678,93 @@ class TestRegimeConditionalLambda:
         snaps = rebalancer.run_backtest(asset_returns, asset_features)
         assert len(snaps) == 100
         assert snaps["equity"].iloc[-1] > 0
+
+
+class TestProxyAssetLambda:
+    """Tests for Phase 51b: lambda_proxy_asset in compute_rtmv_weights_now."""
+
+    def test_proxy_weights_sum_to_one(self) -> None:
+        asset_returns, asset_features = _make_asset_data(n_bars=60, n_assets=4)
+        assets = list(asset_returns.columns)
+        cfg = MultiAssetConfig(n_states=3, n_restarts=1, cov_window_bars=40)
+        w = compute_rtmv_weights_now(
+            asset_returns,
+            asset_features,
+            config=cfg,
+            lambda_by_state_rank=[0.02, 0.05, 0.10],
+            lambda_proxy_asset=assets[0],
+        )
+        assert abs(sum(w.values()) - 1.0) < 1e-6
+
+    def test_proxy_weights_non_negative(self) -> None:
+        asset_returns, asset_features = _make_asset_data(n_bars=60, n_assets=4)
+        assets = list(asset_returns.columns)
+        cfg = MultiAssetConfig(n_states=3, n_restarts=1, cov_window_bars=40)
+        w = compute_rtmv_weights_now(
+            asset_returns,
+            asset_features,
+            config=cfg,
+            lambda_by_state_rank=[0.02, 0.05, 0.10],
+            lambda_proxy_asset=assets[0],
+        )
+        assert all(v >= 0.0 for v in w.values())
+
+    def test_proxy_differs_from_full_average(self) -> None:
+        """Proxy-only and full-average λ selection should differ in at least some cases."""
+        rng = np.random.default_rng(99)
+        found_diff = False
+        for seed in range(5):
+            asset_returns, asset_features = _make_asset_data(n_bars=60, n_assets=4, seed=seed)
+            assets = list(asset_returns.columns)
+            cfg = MultiAssetConfig(n_states=3, n_restarts=1, cov_window_bars=40)
+            w_avg = compute_rtmv_weights_now(
+                asset_returns, asset_features, config=cfg,
+                lambda_by_state_rank=[0.10, 0.05, 0.02],
+            )
+            w_proxy = compute_rtmv_weights_now(
+                asset_returns, asset_features, config=cfg,
+                lambda_by_state_rank=[0.10, 0.05, 0.02],
+                lambda_proxy_asset=assets[0],
+            )
+            if any(abs(w_proxy[a] - w_avg[a]) > 1e-9 for a in assets):
+                found_diff = True
+                break
+        assert found_diff, "Proxy and full-average λ never differed across seeds"
+
+    def test_proxy_asset_unknown_falls_back_to_average(self) -> None:
+        """Proxy asset not in feature window → falls back silently to average."""
+        asset_returns, asset_features = _make_asset_data(n_bars=60, n_assets=4)
+        cfg = MultiAssetConfig(n_states=3, n_restarts=1, cov_window_bars=40)
+        w = compute_rtmv_weights_now(
+            asset_returns,
+            asset_features,
+            config=cfg,
+            lambda_by_state_rank=[0.02, 0.05, 0.10],
+            lambda_proxy_asset="NONEXISTENT",
+        )
+        assert abs(sum(w.values()) - 1.0) < 1e-6
+
+    def test_rebalancer_config_stores_proxy_asset(self) -> None:
+        cfg = RTMVRebalancerConfig(
+            lambda_by_state_rank=[0.02, 0.05, 0.10],
+            lambda_proxy_asset="SPY",
+        )
+        assert cfg.lambda_proxy_asset == "SPY"
+
+    def test_rebalancer_backtest_with_proxy(self) -> None:
+        asset_returns, asset_features = _make_asset_data(n_bars=100, n_assets=4)
+        assets = list(asset_returns.columns)
+        cfg = RTMVRebalancerConfig(
+            assets=assets,
+            lambda_by_state_rank=[0.02, 0.05, 0.10],
+            lambda_proxy_asset=assets[0],
+            n_states=3,
+            n_restarts=1,
+            lookback_bars=60,
+            rebalance_bars=21,
+            drawdown_halt=0.25,
+        )
+        rebalancer = RTMVRebalancer(cfg)
+        snaps = rebalancer.run_backtest(asset_returns, asset_features)
+        assert len(snaps) == 100
+        assert snaps["equity"].iloc[-1] > 0
