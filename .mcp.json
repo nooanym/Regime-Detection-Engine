@@ -16,7 +16,7 @@
         "CLAUDE_FLOW_MAX_AGENTS": "5",
         "CLAUDE_FLOW_MEMORY_BACKEND": "memory"
       },
-      "autoStart": false
+      "autoStart": true
     }
   }
 }
