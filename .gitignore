@@ -56,3 +56,9 @@ htmlcov/
 
 # Deployment prompts containing API keys / project URLs
 docs/lovable_dashboard_prompt.md
+
+# Ruflo / claude-flow runtime data (keep config.yaml tracked)
+.claude-flow/data/
+.claude-flow/logs/
+.claude-flow/sessions/
+.claude-flow/neural/

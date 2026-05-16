@@ -1,4 +1,4 @@
-.PHONY: test test-all test-slow lint format validate-daily validate-hourly validate-rtmv backtest-rtmv run-btc dashboard clean help
+.PHONY: test test-all test-slow lint format validate-daily validate-hourly validate-rtmv backtest-rtmv run-btc dashboard clean help monitor
 
 # ── Test targets ──────────────────────────────────────────────────────────────
 
@@ -101,13 +101,28 @@ backtest-rtmv:
 
 live-rtmv:
 	uv run python scripts/run_rtmv_live.py \
-		--assets SPY,GLD,TLT,IEF \
+		--assets SPY,GLD,SHY,IEF,TLT \
 		--lambda-tilt 0.05 \
 		--n-states 3 \
 		--n-restarts 3 \
 		--output-dir results/rtmv_live \
 		--mode live \
 		--poll-interval 3600
+
+# 5-asset backtest (Phase 52a winner)
+backtest-rtmv-5asset:
+	uv run python scripts/run_rtmv_live.py \
+		--assets SPY,GLD,SHY,IEF,TLT \
+		--lambda-tilt 0.05 \
+		--n-states 3 \
+		--n-restarts 3 \
+		--lookback-bars 504 \
+		--rebalance-bars 21 \
+		--output-dir results/rtmv_live_5asset \
+		--mode backtest
+
+monitor:
+	uv run python scripts/monitor_live_performance.py
 
 # ── Engine runs ───────────────────────────────────────────────────────────────
 
@@ -158,8 +173,10 @@ help:
 	@echo "    make validate-daily-fast  Same but n_restarts=1, n_sims=20 for quick checks"
 	@echo "    make validate-rtmv      Phase 47 RTMV purged CV (fold/cost/shuffle)"
 	@echo "    make validate-rtmv-fast  Same but n_restarts=1, n_shuffle=10 for quick checks"
-	@echo "    make backtest-rtmv      Phase 48 RTMV backtest (SPY/GLD/TLT/IEF, λ=0.05)"
-	@echo "    make live-rtmv          Phase 48 RTMV live paper trading (polls hourly)"
+	@echo "    make backtest-rtmv      4-asset RTMV backtest (SPY/GLD/TLT/IEF, λ=0.05)"
+	@echo "    make backtest-rtmv-5asset  5-asset RTMV backtest (+ SHY, Phase 52a winner)"
+	@echo "    make live-rtmv          5-asset RTMV live paper trading (polls hourly)"
+	@echo "    make monitor            Check live paper trading status (Sharpe, DD, fills)"
 	@echo ""
 	@echo "  Engine"
 	@echo "    make run-btc            rde run on BTC"

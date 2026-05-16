@@ -1,0 +1,69 @@
+# RuFlo V3 Runtime Configuration — Regime Detection Engine
+# Generated: 2026-05-16
+
+version: "3.0.0"
+
+project:
+  name: "regime-detection-engine"
+  description: "RTMV multi-asset HMM regime detection + live paper trading"
+  stack: "python/uv, hmmlearn, pandas, supabase"
+
+swarm:
+  topology: mesh
+  maxAgents: 5
+  autoScale: true
+  coordinationStrategy: consensus
+
+  # Agent profiles for this project
+  agents:
+    research:
+      description: "Runs backtests and parameter studies in parallel"
+      tools: ["Bash", "Read", "Write", "Edit"]
+      model: "claude-sonnet-4-6"
+      commands:
+        - "uv run python scripts/run_phase52_universe_expansion.py"
+        - "uv run python scripts/compare_lambda_strategies.py"
+        - "uv run python scripts/run_multi_asset_backtest.py"
+
+    validator:
+      description: "Runs Phase 37 purged CV validation after code changes"
+      tools: ["Bash", "Read"]
+      model: "claude-haiku-4-5-20251001"
+      commands:
+        - "uv run python scripts/run_phase37_validation.py --config configs/spy_daily.yaml --n-states 3 --train-bars 756 --test-bars 252 --ann-factor 252"
+        - "make test"
+
+    monitor:
+      description: "Monitors live paper trading performance"
+      tools: ["Bash", "Read"]
+      model: "claude-haiku-4-5-20251001"
+      commands:
+        - "uv run python scripts/monitor_live_performance.py"
+
+    analyst:
+      description: "Writes findings docs and updates CLAUDE.md after research phases"
+      tools: ["Read", "Write", "Edit", "Bash"]
+      model: "claude-sonnet-4-6"
+
+memory:
+  backend: memory
+  enableHNSW: false
+  persistPath: .claude-flow/data
+  cacheSize: 100
+  learningBridge:
+    enabled: false
+  memoryGraph:
+    enabled: false
+  agentScopes:
+    enabled: false
+
+neural:
+  enabled: false
+
+hooks:
+  enabled: true
+  autoExecute: true
+
+mcp:
+  autoStart: false
+  port: 3000
