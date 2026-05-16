@@ -502,7 +502,7 @@ uv run pytest tests/test_smoke_btc.py
 
 ---
 
-## 9. Current state (as of Phase 51b)
+## 9. Current state (as of Phase 52a)
 
 **Phases 0–36 are complete on `main`, plus the post-Phase-36 audit branch (`audit/post-phase-36-improvements`).** 1297 tests passing. The system now includes a full live paper-trading loop with risk guard protection and a complete Streamlit dashboard.
 
@@ -574,6 +574,7 @@ uv run pytest tests/test_smoke_btc.py
 | 50 | `trading/rtmv_rebalancer.py`, `evaluation/baselines.py`, `docs/findings/phase50*.md` | Three-quant parameter study. **50a** adaptive λ NO-GO (−0.003 Sharpe; n=3 posteriors too concentrated). **50b** KL-triggered rebalance NO-GO (fires on 87% of bars; HMM refit window drift dominates KL signal). **50c** two GOs: halt=20% raised to 25% (+0.027 Sharpe, natural MDD is 21.5% so 20% was premature); RTMV beats risk parity baseline (+0.021 Sharpe, +0.035 Calmar, −1.1pp MDD). 1535 tests. |
 | 51 | `analysis/multi_asset_allocation.py`, `trading/rtmv_rebalancer.py`, `scripts/compare_lambda_strategies.py` | Regime-conditional λ via per-asset rank averaging. NO-GO: best +0.003 Sharpe (threshold +0.010). Root cause: SPY rank-0 (bear) + TLT rank-2 (bond-bull) cancel → mean rank stays neutral. See `docs/findings/phase51_regime_conditional_lambda.md`. |
 | 51b | `analysis/multi_asset_allocation.py` (`lambda_proxy_asset`), `trading/rtmv_rebalancer.py`, `scripts/compare_lambda_strategies.py` | SPY-proxy λ — use only SPY's dominant state rank to set portfolio λ. `spy_rank_bull=[0.02,0.05,0.10]` **GO: +0.011 Sharpe** (Sharpe=0.8948 vs baseline 0.8838, MDD −0.2pp). 1548 tests. See `docs/findings/phase51b_spy_proxy_lambda.md`. |
+| 52a | `scripts/run_phase52_universe_expansion.py`, `results/phase52/` | Bond maturity ladder: 4/5/6-asset universe expansion. **GO: 5-asset (SPY/GLD/SHY/IEF/TLT) wins** — spy_rank_bull Sharpe=0.9726 (+0.0778 vs 4-asset baseline). MDD −15.6% vs −21.3% (−5.7 pp). Adding SHY spans the full duration curve. 6-asset (+TIP) improves MDD slightly (−14.9%) but reduces Sharpe (0.9665). See `docs/findings/phase52a_bond_ladder.md`. |
 
 ### Full pipeline (paper trading)
 
@@ -673,8 +674,10 @@ make live-rtmv              # polls yfinance every 3600s, rebalances monthly (ha
 
 **Phase 51b GO — spy_rank_bull deployed.** `lambda_by_state_rank=[0.02, 0.05, 0.10]` with `lambda_proxy_asset="SPY"`. Sharpe=0.8948 (+0.011 vs fixed_l05 baseline of 0.8838). Marginal pass — monitor over live paper trading period.
 
+**Phase 52a GO — 5-asset universe (SPY/GLD/SHY/IEF/TLT) replaces 4-asset.** spy_rank_bull Sharpe=0.9726 (+0.0778 vs 4-asset baseline). MDD −15.6% (was −21.3%). Update live config to use the 5-asset universe. 6-asset (+ TIP) is marginal NO relative to 5-asset (lower Sharpe −0.006, though lower MDD −0.7pp).
+
 **Confirmed next direction:**
-→ Run `make live-rtmv` with `lambda_proxy_asset="SPY"` and `lambda_by_state_rank=[0.02,0.05,0.10]` to begin live paper trading. Monitor for 1–3 months. Next research directions: (1) Phase 52a: bond maturity ladder (add SHY+TIP to universe); (2) Phase 53: online-posterior KL monitor using reference posterior (decouple trigger from refit); (3) Phase 54: joint HMM on 4D return vector.
+→ Update live deployment to 5-asset (SPY/GLD/SHY/IEF/TLT) with spy_rank_bull schedule. New live Sharpe target: ~0.90–0.93. Next research directions: (1) Phase 53: online-posterior KL monitor using reference posterior (decouple trigger from refit); (2) Phase 54: joint HMM on 5D return vector (now 5 assets); (3) re-run Phase 47 shuffle test on 5-asset universe to validate p < 0.10.
 
 The Notion roadmap and tasks database are the source of truth for sequencing. Update Notion as work progresses.
 
