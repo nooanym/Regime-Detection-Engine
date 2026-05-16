@@ -103,17 +103,21 @@ live-rtmv:
 	uv run python scripts/run_rtmv_live.py \
 		--assets SPY,GLD,SHY,IEF,TLT \
 		--lambda-tilt 0.05 \
+		--lambda-by-state-rank 0.02,0.05,0.10 \
+		--proxy-asset SPY \
 		--n-states 3 \
 		--n-restarts 3 \
 		--output-dir results/rtmv_live \
 		--mode live \
 		--poll-interval 3600
 
-# 5-asset backtest (Phase 52a winner)
+# 5-asset backtest (Phase 52a winner: SPY/GLD/SHY/IEF/TLT + spy_rank_bull)
 backtest-rtmv-5asset:
 	uv run python scripts/run_rtmv_live.py \
 		--assets SPY,GLD,SHY,IEF,TLT \
 		--lambda-tilt 0.05 \
+		--lambda-by-state-rank 0.02,0.05,0.10 \
+		--proxy-asset SPY \
 		--n-states 3 \
 		--n-restarts 3 \
 		--lookback-bars 504 \

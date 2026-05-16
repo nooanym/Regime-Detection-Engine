@@ -253,6 +253,12 @@ def _parse_args() -> argparse.Namespace:
                    help="Poll interval in seconds (live mode only)")
     p.add_argument("--start-date", default=None,
                    help="Backtest start date YYYY-MM-DD (default: full history)")
+    p.add_argument("--lambda-by-state-rank", default=None,
+                   help="Comma-separated λ schedule by SPY state rank, e.g. 0.02,0.05,0.10")
+    p.add_argument("--proxy-asset", default=None,
+                   help="Asset whose state rank drives λ selection (e.g. SPY)")
+    p.add_argument("--kl-trigger-threshold", type=float, default=0.0,
+                   help="Phase 53 KL threshold for out-of-cycle rebalance (0=disabled)")
     return p.parse_args()
 
 
@@ -262,9 +268,16 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    lambda_by_state_rank = (
+        [float(x) for x in args.lambda_by_state_rank.split(",")]
+        if args.lambda_by_state_rank else []
+    )
     cfg = RTMVRebalancerConfig(
         assets=assets,
         lambda_tilt=args.lambda_tilt,
+        lambda_by_state_rank=lambda_by_state_rank,
+        lambda_proxy_asset=args.proxy_asset,
+        kl_trigger_threshold=args.kl_trigger_threshold,
         rebalance_bars=args.rebalance_bars,
         lookback_bars=args.lookback_bars,
         n_states=args.n_states,

@@ -1003,9 +1003,10 @@ def compute_rtmv_weights_now(
     lambda_min: float = 0.02,
     lambda_max: float = 0.15,
     return_posteriors: bool = False,
+    return_models: bool = False,
     lambda_by_state_rank: list[float] | None = None,
     lambda_proxy_asset: str | None = None,
-) -> dict[str, float] | tuple[dict[str, float], dict[str, np.ndarray]]:
+) -> dict[str, float] | tuple:
     """Compute RTMV target weights from a fixed-length lookback window.
 
     This is the live-compatible version of the per-step logic inside
@@ -1039,8 +1040,12 @@ def compute_rtmv_weights_now(
     return_posteriors : bool
         If ``True``, also return a per-asset dict of last-bar HMM posteriors
         (shape ``(n_states,)`` each). Used by posterior-triggered rebalancers
-        (Phase 50b) to compute KL divergence between rebalances.  Assets where
-        HMM fitting failed map to a uniform posterior.
+        (Phase 50b/53) to compute KL divergence between rebalances.  Assets
+        where HMM fitting failed map to a uniform posterior.
+    return_models : bool
+        If ``True``, also return the per-asset ``FittedModel`` objects.
+        Used by Phase 53 to initialise ``OnlineDecoder`` instances that are
+        stepped cheaply between rebalances (no refit).
     lambda_by_state_rank : list[float], optional
         Regime-conditional λ schedule (Phase 51/51b).  Length must equal
         ``config.n_states``.  Element ``k`` is the λ to use when the
@@ -1089,8 +1094,12 @@ def compute_rtmv_weights_now(
     if ret_arr.shape[0] < max(4, N + 1):
         logger.warning("Insufficient data (%d bars) — returning equal weights.", ret_arr.shape[0])
         weights = {a: 1.0 / N for a in assets}
+        if return_posteriors and return_models:
+            return weights, {a: uniform_post.copy() for a in assets}, {}
         if return_posteriors:
             return weights, {a: uniform_post.copy() for a in assets}
+        if return_models:
+            return weights, {}
         return weights
 
     # Joint covariance from the tail of the window.
@@ -1108,6 +1117,7 @@ def compute_rtmv_weights_now(
     exp_returns = np.zeros(N)
     last_posteriors: list[np.ndarray] = []
     posteriors_per_asset: dict[str, np.ndarray] = {a: uniform_post.copy() for a in assets}
+    fitted_models_per_asset: dict[str, object] = {}  # FittedModel per asset (Phase 53)
     dominant_state_ranks: list[int] = []  # per-asset dominant state return rank
     proxy_asset_rank: int | None = None   # rank for the proxy asset (Phase 51b)
     for i, asset in enumerate(assets):
@@ -1128,6 +1138,7 @@ def compute_rtmv_weights_now(
                 n_restarts=cfg.n_restarts,
                 **tkwargs,
             )
+            fitted_models_per_asset[asset] = fitted
             decoder = OnlineDecoder(fitted)
             posteriors = decoder.batch_filter(feat_arr)  # (T, K)
             last_posteriors.append(posteriors[-1])
@@ -1183,6 +1194,10 @@ def compute_rtmv_weights_now(
         w_raw /= total
 
     weights = {a: float(w) for a, w in zip(assets, w_raw)}
+    if return_posteriors and return_models:
+        return weights, posteriors_per_asset, fitted_models_per_asset
     if return_posteriors:
         return weights, posteriors_per_asset
+    if return_models:
+        return weights, fitted_models_per_asset
     return weights

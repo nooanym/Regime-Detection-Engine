@@ -768,3 +768,93 @@ class TestProxyAssetLambda:
         snaps = rebalancer.run_backtest(asset_returns, asset_features)
         assert len(snaps) == 100
         assert snaps["equity"].iloc[-1] > 0
+
+
+class TestPhase53KLMonitor:
+    """Tests for Phase 53: reference-posterior KL monitor."""
+
+    def test_config_stores_kl_threshold(self) -> None:
+        cfg = RTMVRebalancerConfig(kl_trigger_threshold=0.10)
+        assert cfg.kl_trigger_threshold == 0.10
+
+    def test_backtest_disabled_kl_same_as_baseline(self) -> None:
+        """kl_trigger_threshold=0 should behave identically to no-KL."""
+        asset_returns, asset_features = _make_asset_data(n_bars=120, n_assets=4)
+        assets = list(asset_returns.columns)
+        base_cfg = RTMVRebalancerConfig(
+            assets=assets, n_states=3, n_restarts=1,
+            lookback_bars=60, rebalance_bars=21, kl_trigger_threshold=0.0,
+        )
+        snaps_base = RTMVRebalancer(base_cfg).run_backtest(asset_returns, asset_features)
+        assert snaps_base["n_rebalances"].iloc[-1] >= 1
+
+    def test_backtest_with_kl53_enabled_completes(self) -> None:
+        """kl_trigger_threshold > 0 should complete without error."""
+        asset_returns, asset_features = _make_asset_data(n_bars=150, n_assets=4)
+        assets = list(asset_returns.columns)
+        cfg = RTMVRebalancerConfig(
+            assets=assets, n_states=3, n_restarts=1,
+            lookback_bars=60, rebalance_bars=21,
+            kl_trigger_threshold=0.05,
+            kl_min_bars_between_triggers=3,
+        )
+        snaps = RTMVRebalancer(cfg).run_backtest(asset_returns, asset_features)
+        assert len(snaps) == 150
+        assert snaps["equity"].iloc[-1] > 0
+        assert "kl53_triggered" in snaps.columns
+        assert "mean_kl53" in snaps.columns
+
+    def test_kl53_triggers_recorded(self) -> None:
+        """n_kl53_triggers should be non-negative and ≤ n_rebalances."""
+        asset_returns, asset_features = _make_asset_data(n_bars=150, n_assets=4)
+        assets = list(asset_returns.columns)
+        cfg = RTMVRebalancerConfig(
+            assets=assets, n_states=3, n_restarts=1,
+            lookback_bars=60, rebalance_bars=21,
+            kl_trigger_threshold=0.001,  # very low to force some triggers
+            kl_min_bars_between_triggers=2,
+        )
+        snaps = RTMVRebalancer(cfg).run_backtest(asset_returns, asset_features)
+        n_kl53 = int(snaps["n_kl53_triggers"].iloc[-1])
+        n_reb = int(snaps["n_rebalances"].iloc[-1])
+        assert 0 <= n_kl53 <= n_reb
+
+    def test_return_models_from_compute_rtmv(self) -> None:
+        """compute_rtmv_weights_now with return_models=True returns fitted models."""
+        asset_returns, asset_features = _make_asset_data(n_bars=80, n_assets=3)
+        cfg = MultiAssetConfig(n_states=3, n_restarts=1, lookback_bars=60)
+        result = compute_rtmv_weights_now(
+            asset_returns, asset_features,
+            config=cfg, return_models=True,
+        )
+        assert isinstance(result, tuple)
+        weights, fitted_models = result
+        assert abs(sum(weights.values()) - 1.0) < 1e-6
+        assert isinstance(fitted_models, dict)
+
+    def test_return_posteriors_and_models(self) -> None:
+        """return_posteriors=True and return_models=True returns 3-tuple."""
+        asset_returns, asset_features = _make_asset_data(n_bars=80, n_assets=3)
+        cfg = MultiAssetConfig(n_states=3, n_restarts=1, lookback_bars=60)
+        result = compute_rtmv_weights_now(
+            asset_returns, asset_features,
+            config=cfg, return_posteriors=True, return_models=True,
+        )
+        assert isinstance(result, tuple) and len(result) == 3
+        weights, posteriors, fitted_models = result
+        assert abs(sum(weights.values()) - 1.0) < 1e-6
+        assert all(abs(p.sum() - 1.0) < 1e-6 for p in posteriors.values())
+
+    def test_online_decoders_initialised_after_first_rebalance(self) -> None:
+        """After the first calendar rebalance, online decoders should be populated."""
+        asset_returns, asset_features = _make_asset_data(n_bars=100, n_assets=3)
+        assets = list(asset_returns.columns)
+        cfg = RTMVRebalancerConfig(
+            assets=assets, n_states=3, n_restarts=1,
+            lookback_bars=60, rebalance_bars=21,
+            kl_trigger_threshold=0.05,
+        )
+        reb = RTMVRebalancer(cfg)
+        reb.run_backtest(asset_returns, asset_features)
+        assert len(reb.state.kl53_online_decoders) > 0
+        assert len(reb.state.kl53_reference_posteriors) > 0

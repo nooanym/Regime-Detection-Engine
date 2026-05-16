@@ -96,6 +96,8 @@ class RTMVRebalancerConfig:
     rebalance_kl_threshold: float = 0.0
     lambda_by_state_rank: list[float] = field(default_factory=list)
     lambda_proxy_asset: str | None = None
+    kl_trigger_threshold: float = 0.0
+    kl_min_bars_between_triggers: int = 5
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +145,11 @@ class RTMVRebalancerState:
     posterior_at_last_rebalance: dict = field(default_factory=dict)
     n_kl_rebalances: int = 0
     last_lambda_effective: float = 0.05
+    # Phase 53: reference-posterior KL monitor
+    kl53_reference_posteriors: dict = field(default_factory=dict)
+    kl53_online_decoders: dict = field(default_factory=dict)
+    kl53_bars_since_trigger: int = 0
+    n_kl53_triggers: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -326,16 +333,71 @@ class RTMVRebalancer:
         target_weights: dict[str, float] | None = None
         triggered_by_kl = False
         mean_kl: float | None = None
+        triggered_by_kl53 = False
+        mean_kl53: float | None = None
+        self.state.kl53_bars_since_trigger += 1
 
-        # KL-triggered early rebalance: only checked when calendar has NOT
-        # already fired, posteriors from a prior rebalance exist, and the
-        # threshold is enabled.
+        # Phase 53: cheap online-posterior KL check (no refit between rebalances).
+        # Requires kl53 reference decoders to exist (set at last calendar rebalance).
+        kl53_check_active = (
+            self.config.kl_trigger_threshold > 0.0
+            and self.state.kl53_online_decoders
+            and enough_history
+            and trading_ok
+            and not calendar_due
+            and self.state.kl53_bars_since_trigger >= self.config.kl_min_bars_between_triggers
+        )
+        if kl53_check_active:
+            online_posts: dict[str, np.ndarray] = {}
+            for asset in self.config.assets:
+                dec = self.state.kl53_online_decoders.get(asset)
+                if dec is None:
+                    continue
+                feat_buf = self._features_buf[asset]
+                if feat_buf.empty or asset not in features_rows:
+                    continue
+                cols = list(feat_buf.columns)
+                x = np.array([features_rows[asset].get(c, 0.0) for c in cols], dtype=float)
+                online_posts[asset] = dec.step(x)
+
+            if online_posts and self.state.kl53_reference_posteriors:
+                mean_kl53 = self._mean_kl_53(online_posts)
+                dominant_changed = any(
+                    int(np.argmax(online_posts[a]))
+                    != int(np.argmax(self.state.kl53_reference_posteriors[a]))
+                    for a in online_posts
+                    if a in self.state.kl53_reference_posteriors
+                )
+                if mean_kl53 > self.config.kl_trigger_threshold and dominant_changed:
+                    ret_window = self._returns_buf.tail(self.ma_config.lookback_bars)
+                    feat_window = {
+                        a: self._features_buf[a].tail(self.ma_config.lookback_bars)
+                        for a in self.config.assets
+                    }
+                    result = compute_rtmv_weights_now(
+                        ret_window,
+                        feat_window,
+                        config=self.ma_config,
+                        lambda_tilt=self.config.lambda_tilt,
+                        train_kwargs=self._train_kwargs,
+                        return_posteriors=False,
+                        return_models=False,
+                        lambda_by_state_rank=self.config.lambda_by_state_rank or None,
+                        lambda_proxy_asset=self.config.lambda_proxy_asset,
+                    )
+                    target_weights = result
+                    triggered_by_kl53 = True
+                    self.state.n_kl53_triggers += 1
+                    self.state.kl53_bars_since_trigger = 0
+
+        # Phase 50b KL-triggered early rebalance (legacy, disabled by default).
         kl_check_active = (
             self.config.rebalance_kl_threshold > 0.0
             and len(self.state.posterior_at_last_rebalance) > 0
             and enough_history
             and trading_ok
             and not calendar_due
+            and target_weights is None
         )
         if kl_check_active:
             ret_window = self._returns_buf.tail(self.ma_config.lookback_bars)
@@ -369,6 +431,7 @@ class RTMVRebalancer:
                 for a in self.config.assets
             }
             need_posteriors = self.config.rebalance_kl_threshold > 0.0
+            need_models = self.config.kl_trigger_threshold > 0.0
             result = compute_rtmv_weights_now(
                 ret_window,
                 feat_window,
@@ -378,11 +441,28 @@ class RTMVRebalancer:
                 adaptive_lambda=self.config.adaptive_lambda,
                 lambda_min=self.config.lambda_min,
                 lambda_max=self.config.lambda_max,
-                return_posteriors=need_posteriors,
+                return_posteriors=need_posteriors or need_models,
+                return_models=need_models,
                 lambda_by_state_rank=self.config.lambda_by_state_rank or None,
                 lambda_proxy_asset=self.config.lambda_proxy_asset,
             )
-            if need_posteriors:
+            if need_models:
+                target_weights, current_posteriors, fitted_models = result
+                self.state.posterior_at_last_rebalance = current_posteriors
+                # Phase 53: initialise online decoders from new fitted models.
+                from rde.inference.online import OnlineDecoder
+                new_decoders: dict = {}
+                new_ref_posts: dict = {}
+                for asset, fitted in fitted_models.items():
+                    feat_arr = feat_window[asset].values.astype(float)
+                    dec = OnlineDecoder(fitted)
+                    dec.batch_filter(feat_arr)  # warm up to last bar of lookback
+                    new_decoders[asset] = dec
+                    new_ref_posts[asset] = dec.filtered_posterior.copy()
+                self.state.kl53_online_decoders = new_decoders
+                self.state.kl53_reference_posteriors = new_ref_posts
+                self.state.kl53_bars_since_trigger = 0
+            elif need_posteriors:
                 target_weights, current_posteriors = result
                 self.state.posterior_at_last_rebalance = current_posteriors
             else:
@@ -417,11 +497,12 @@ class RTMVRebalancer:
             if eq > self.state.peak_equity:
                 self.state.peak_equity = eq
 
+            trigger_reason = "KL53" if triggered_by_kl53 else ("KL" if triggered_by_kl else "calendar")
             logger.info(
                 "%s  REBALANCE #%d (%s)  weights=%s  equity=%.2f",
                 date.date() if hasattr(date, "date") else date,
                 self.state.n_rebalances,
-                "KL" if triggered_by_kl else "calendar",
+                trigger_reason,
                 {k: f"{v:.3f}" for k, v in target_weights.items()},
                 eq,
             )
@@ -433,6 +514,9 @@ class RTMVRebalancer:
             "rebalance": target_weights is not None,
             "kl_triggered": triggered_by_kl,
             "mean_kl": mean_kl if mean_kl is not None else float("nan"),
+            "kl53_triggered": triggered_by_kl53,
+            "mean_kl53": mean_kl53 if mean_kl53 is not None else float("nan"),
+            "n_kl53_triggers": self.state.n_kl53_triggers,
         }
         self.state.snapshots.append(snap)
 
@@ -459,6 +543,26 @@ class RTMVRebalancer:
     # ------------------------------------------------------------------
     # KL helpers
     # ------------------------------------------------------------------
+
+    def _mean_kl_53(self, online_posts: dict[str, np.ndarray]) -> float:
+        """Mean across assets of KL(online_posterior || kl53_reference_posterior).
+
+        Uses the same model for both sides — so KL reflects regime drift only,
+        not model drift (the Phase 50b failure mode).
+        """
+        ref = self.state.kl53_reference_posteriors
+        eps = 1e-15
+        kls: list[float] = []
+        for asset, p in online_posts.items():
+            q = ref.get(asset)
+            if q is None or p.shape != q.shape:
+                continue
+            p_safe = np.asarray(p, dtype=float) + eps
+            q_safe = np.asarray(q, dtype=float) + eps
+            p_safe = p_safe / p_safe.sum()
+            q_safe = q_safe / q_safe.sum()
+            kls.append(max(float(np.sum(p_safe * np.log(p_safe / q_safe))), 0.0))
+        return float(np.mean(kls)) if kls else 0.0
 
     def _mean_posterior_kl(self, current: dict[str, np.ndarray]) -> float:
         """Mean across assets of KL(current || posterior_at_last_rebalance).
