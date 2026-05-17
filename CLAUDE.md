@@ -502,7 +502,7 @@ uv run pytest tests/test_smoke_btc.py
 
 ---
 
-## 9. Current state (as of Phase 52a)
+## 9. Current state (as of Phase 53)
 
 **Phases 0–36 are complete on `main`, plus the post-Phase-36 audit branch (`audit/post-phase-36-improvements`).** 1297 tests passing. The system now includes a full live paper-trading loop with risk guard protection and a complete Streamlit dashboard.
 
@@ -575,6 +575,7 @@ uv run pytest tests/test_smoke_btc.py
 | 51 | `analysis/multi_asset_allocation.py`, `trading/rtmv_rebalancer.py`, `scripts/compare_lambda_strategies.py` | Regime-conditional λ via per-asset rank averaging. NO-GO: best +0.003 Sharpe (threshold +0.010). Root cause: SPY rank-0 (bear) + TLT rank-2 (bond-bull) cancel → mean rank stays neutral. See `docs/findings/phase51_regime_conditional_lambda.md`. |
 | 51b | `analysis/multi_asset_allocation.py` (`lambda_proxy_asset`), `trading/rtmv_rebalancer.py`, `scripts/compare_lambda_strategies.py` | SPY-proxy λ — use only SPY's dominant state rank to set portfolio λ. `spy_rank_bull=[0.02,0.05,0.10]` **GO: +0.011 Sharpe** (Sharpe=0.8948 vs baseline 0.8838, MDD −0.2pp). 1548 tests. See `docs/findings/phase51b_spy_proxy_lambda.md`. |
 | 52a | `scripts/run_phase52_universe_expansion.py`, `results/phase52/` | Bond maturity ladder: 4/5/6-asset universe expansion. **GO: 5-asset (SPY/GLD/SHY/IEF/TLT) wins** — spy_rank_bull Sharpe=0.9726 (+0.0778 vs 4-asset baseline). MDD −15.6% vs −21.3% (−5.7 pp). Adding SHY spans the full duration curve. 6-asset (+TIP) improves MDD slightly (−14.9%) but reduces Sharpe (0.9665). See `docs/findings/phase52a_bond_ladder.md`. |
+| 53 | `trading/rtmv_rebalancer.py`, `scripts/run_phase53_kl_monitor.py`, `results/phase53/` | Online-posterior KL monitor. **NO-GO.** All thresholds [0.05–2.0] fire 45.7×/yr — `kl_min_bars_between_triggers=5` is binding, not KL. Forward filter on n=3 daily HMM oscillates every ~5 bars regardless. Confidence gate (`kl_min_dominant_confidence=0.50`) did not reduce trigger rate. See `docs/findings/phase53_kl_monitor.md`. |
 
 ### Full pipeline (paper trading)
 
@@ -676,8 +677,10 @@ make live-rtmv              # polls yfinance every 3600s, rebalances monthly (ha
 
 **Phase 52a GO — 5-asset universe (SPY/GLD/SHY/IEF/TLT) replaces 4-asset.** spy_rank_bull Sharpe=0.9726 (+0.0778 vs 4-asset baseline). MDD −15.6% (was −21.3%). Update live config to use the 5-asset universe. 6-asset (+ TIP) is marginal NO relative to 5-asset (lower Sharpe −0.006, though lower MDD −0.7pp).
 
+**Phase 53 NO-GO — online-posterior KL monitor failed.** All thresholds [0.05–2.0] fire at 45.7 triggers/year regardless of KL threshold — `kl_min_bars_between_triggers=5` is the binding constraint. Forward filter on n=3 daily HMM oscillates between states every ~5 bars; KL is always large relative to any tested threshold. Confidence gate (`kl_min_dominant_confidence=0.50`) did not help. Root cause: online forward-filter posteriors are inherently noisy on daily data. No threshold produces ≤4 triggers/year. See `docs/findings/phase53_kl_monitor.md`.
+
 **Confirmed next direction:**
-→ Update live deployment to 5-asset (SPY/GLD/SHY/IEF/TLT) with spy_rank_bull schedule. New live Sharpe target: ~0.90–0.93. Next research directions: (1) Phase 53: online-posterior KL monitor using reference posterior (decouple trigger from refit); (2) Phase 54: joint HMM on 5D return vector (now 5 assets); (3) re-run Phase 47 shuffle test on 5-asset universe to validate p < 0.10.
+→ Phase 54: joint HMM on 5D return vector (SPY/GLD/SHY/IEF/TLT simultaneously) — cleaner state transitions may fix the poster noise that killed Phase 53. Parallel track: arbitrage/inefficiency research (crypto funding carry, vol risk premium, stat-arb pairs using Phase 24 cointegration).
 
 The Notion roadmap and tasks database are the source of truth for sequencing. Update Notion as work progresses.
 
