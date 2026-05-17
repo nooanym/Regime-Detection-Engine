@@ -106,7 +106,12 @@ def _metrics(snaps: pd.DataFrame) -> dict:
     }
 
 
-def _run(asset_returns: pd.DataFrame, asset_features: dict, threshold: float) -> dict:
+def _run(
+    asset_returns: pd.DataFrame,
+    asset_features: dict,
+    threshold: float,
+    min_confidence: float = 0.50,
+) -> dict:
     cfg = RTMVRebalancerConfig(
         assets=ASSETS,
         lambda_tilt=0.05,
@@ -114,6 +119,7 @@ def _run(asset_returns: pd.DataFrame, asset_features: dict, threshold: float) ->
         lambda_proxy_asset="SPY",
         kl_trigger_threshold=threshold,
         kl_min_bars_between_triggers=5,
+        kl_min_dominant_confidence=min_confidence,
         n_states=3,
         n_restarts=3,
         lookback_bars=504,
@@ -127,13 +133,18 @@ def _run(asset_returns: pd.DataFrame, asset_features: dict, threshold: float) ->
 def main() -> None:
     p = argparse.ArgumentParser(description="Phase 53: KL monitor calibration")
     p.add_argument(
-        "--thresholds", default="0.0,0.05,0.10,0.20,0.50",
+        "--thresholds", default="0.0,0.05,0.10,0.20,0.50,1.0,2.0",
         help="Comma-separated KL thresholds to test (0.0 = calendar-only baseline)",
+    )
+    p.add_argument(
+        "--min-confidence", type=float, default=0.50,
+        help="Minimum dominant-state posterior confidence required to trigger (default 0.50)",
     )
     args = p.parse_args()
     thresholds = [float(x) for x in args.thresholds.split(",")]
+    min_conf = args.min_confidence
 
-    print("Loading 5-asset data…", flush=True)
+    print(f"Loading 5-asset data…  (min_confidence={min_conf})", flush=True)
     asset_returns, asset_features = _load_data()
     n_bars = len(asset_returns)
     n_years = n_bars / 252
@@ -143,9 +154,10 @@ def main() -> None:
     for t in thresholds:
         label = "calendar-only" if t == 0.0 else f"kl53={t}"
         print(f"\nRunning {label}…", flush=True)
-        m = _run(asset_returns, asset_features, t)
+        m = _run(asset_returns, asset_features, t, min_confidence=min_conf)
         m["threshold"] = t
         m["label"] = label
+        m["min_confidence"] = min_conf
         rows.append(m)
         print(f"  Sharpe={m['Sharpe']}  MDD={m['MDD']}  Reb/yr={m['Reb/yr']}  KL53/yr={m['KL53/yr']}")
 

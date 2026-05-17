@@ -98,6 +98,7 @@ class RTMVRebalancerConfig:
     lambda_proxy_asset: str | None = None
     kl_trigger_threshold: float = 0.0
     kl_min_bars_between_triggers: int = 5
+    kl_min_dominant_confidence: float = 0.50
 
 
 # ---------------------------------------------------------------------------
@@ -362,9 +363,11 @@ class RTMVRebalancer:
 
             if online_posts and self.state.kl53_reference_posteriors:
                 mean_kl53 = self._mean_kl_53(online_posts)
+                min_conf = self.config.kl_min_dominant_confidence
                 dominant_changed = any(
                     int(np.argmax(online_posts[a]))
                     != int(np.argmax(self.state.kl53_reference_posteriors[a]))
+                    and float(np.max(online_posts[a])) >= min_conf
                     for a in online_posts
                     if a in self.state.kl53_reference_posteriors
                 )

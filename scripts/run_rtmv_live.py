@@ -259,6 +259,8 @@ def _parse_args() -> argparse.Namespace:
                    help="Asset whose state rank drives λ selection (e.g. SPY)")
     p.add_argument("--kl-trigger-threshold", type=float, default=0.0,
                    help="Phase 53 KL threshold for out-of-cycle rebalance (0=disabled)")
+    p.add_argument("--kl-min-confidence", type=float, default=0.50,
+                   help="Phase 53 minimum dominant-state confidence to trigger (default 0.50)")
     return p.parse_args()
 
 
@@ -278,6 +280,7 @@ def main() -> None:
         lambda_by_state_rank=lambda_by_state_rank,
         lambda_proxy_asset=args.proxy_asset,
         kl_trigger_threshold=args.kl_trigger_threshold,
+        kl_min_dominant_confidence=args.kl_min_confidence,
         rebalance_bars=args.rebalance_bars,
         lookback_bars=args.lookback_bars,
         n_states=args.n_states,
