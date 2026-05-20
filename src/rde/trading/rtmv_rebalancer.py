@@ -99,6 +99,14 @@ class RTMVRebalancerConfig:
     kl_trigger_threshold: float = 0.0
     kl_min_bars_between_triggers: int = 5
     kl_min_dominant_confidence: float = 0.50
+    joint_hmm_mode: bool = False
+    joint_hmm_covariance_type: str = "diag"
+    momentum_overlay: bool = False
+    momentum_lookback: int = 252
+    momentum_skip: int = 21
+    momentum_lambda_high: float = 0.15
+    momentum_lambda_low: float = 0.01
+    momentum_tilt_scale: float = 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -387,6 +395,12 @@ class RTMVRebalancer:
                         return_models=False,
                         lambda_by_state_rank=self.config.lambda_by_state_rank or None,
                         lambda_proxy_asset=self.config.lambda_proxy_asset,
+                        momentum_overlay=self.config.momentum_overlay,
+                        momentum_lookback=self.config.momentum_lookback,
+                        momentum_skip=self.config.momentum_skip,
+                        momentum_lambda_high=self.config.momentum_lambda_high,
+                        momentum_lambda_low=self.config.momentum_lambda_low,
+                        momentum_tilt_scale=self.config.momentum_tilt_scale,
                     )
                     target_weights = result
                     triggered_by_kl53 = True
@@ -420,6 +434,12 @@ class RTMVRebalancer:
                 return_posteriors=True,
                 lambda_by_state_rank=self.config.lambda_by_state_rank or None,
                 lambda_proxy_asset=self.config.lambda_proxy_asset,
+                momentum_overlay=self.config.momentum_overlay,
+                momentum_lookback=self.config.momentum_lookback,
+                momentum_skip=self.config.momentum_skip,
+                momentum_lambda_high=self.config.momentum_lambda_high,
+                momentum_lambda_low=self.config.momentum_lambda_low,
+                momentum_tilt_scale=self.config.momentum_tilt_scale,
             )
             mean_kl = self._mean_posterior_kl(current_posteriors)
             if mean_kl > self.config.rebalance_kl_threshold:
@@ -433,43 +453,68 @@ class RTMVRebalancer:
                 a: self._features_buf[a].tail(self.ma_config.lookback_bars)
                 for a in self.config.assets
             }
-            need_posteriors = self.config.rebalance_kl_threshold > 0.0
-            need_models = self.config.kl_trigger_threshold > 0.0
-            result = compute_rtmv_weights_now(
-                ret_window,
-                feat_window,
-                config=self.ma_config,
-                lambda_tilt=self.config.lambda_tilt,
-                train_kwargs=self._train_kwargs,
-                adaptive_lambda=self.config.adaptive_lambda,
-                lambda_min=self.config.lambda_min,
-                lambda_max=self.config.lambda_max,
-                return_posteriors=need_posteriors or need_models,
-                return_models=need_models,
-                lambda_by_state_rank=self.config.lambda_by_state_rank or None,
-                lambda_proxy_asset=self.config.lambda_proxy_asset,
-            )
-            if need_models:
-                target_weights, current_posteriors, fitted_models = result
-                self.state.posterior_at_last_rebalance = current_posteriors
-                # Phase 53: initialise online decoders from new fitted models.
-                from rde.inference.online import OnlineDecoder
-                new_decoders: dict = {}
-                new_ref_posts: dict = {}
-                for asset, fitted in fitted_models.items():
-                    feat_arr = feat_window[asset].values.astype(float)
-                    dec = OnlineDecoder(fitted)
-                    dec.batch_filter(feat_arr)  # warm up to last bar of lookback
-                    new_decoders[asset] = dec
-                    new_ref_posts[asset] = dec.filtered_posterior.copy()
-                self.state.kl53_online_decoders = new_decoders
-                self.state.kl53_reference_posteriors = new_ref_posts
-                self.state.kl53_bars_since_trigger = 0
-            elif need_posteriors:
-                target_weights, current_posteriors = result
-                self.state.posterior_at_last_rebalance = current_posteriors
+
+            if self.config.joint_hmm_mode:
+                # Phase 54: single joint HMM on the stacked N-D return vector.
+                from rde.analysis.multi_asset_allocation import (
+                    compute_rtmv_weights_now_joint,
+                )
+                joint_train_kwargs = dict(self._train_kwargs)
+                joint_train_kwargs.setdefault(
+                    "covariance_type", self.config.joint_hmm_covariance_type
+                )
+                target_weights = compute_rtmv_weights_now_joint(
+                    ret_window,
+                    config=self.ma_config,
+                    lambda_tilt=self.config.lambda_tilt,
+                    train_kwargs=joint_train_kwargs,
+                    lambda_by_state_rank=self.config.lambda_by_state_rank or None,
+                    spy_asset=self.config.lambda_proxy_asset or (self.config.assets[0] if self.config.assets else "SPY"),
+                )
             else:
-                target_weights = result
+                need_posteriors = self.config.rebalance_kl_threshold > 0.0
+                need_models = self.config.kl_trigger_threshold > 0.0
+                result = compute_rtmv_weights_now(
+                    ret_window,
+                    feat_window,
+                    config=self.ma_config,
+                    lambda_tilt=self.config.lambda_tilt,
+                    train_kwargs=self._train_kwargs,
+                    adaptive_lambda=self.config.adaptive_lambda,
+                    lambda_min=self.config.lambda_min,
+                    lambda_max=self.config.lambda_max,
+                    return_posteriors=need_posteriors or need_models,
+                    return_models=need_models,
+                    lambda_by_state_rank=self.config.lambda_by_state_rank or None,
+                    lambda_proxy_asset=self.config.lambda_proxy_asset,
+                    momentum_overlay=self.config.momentum_overlay,
+                    momentum_lookback=self.config.momentum_lookback,
+                    momentum_skip=self.config.momentum_skip,
+                    momentum_lambda_high=self.config.momentum_lambda_high,
+                    momentum_lambda_low=self.config.momentum_lambda_low,
+                    momentum_tilt_scale=self.config.momentum_tilt_scale,
+                )
+                if need_models:
+                    target_weights, current_posteriors, fitted_models = result
+                    self.state.posterior_at_last_rebalance = current_posteriors
+                    # Phase 53: initialise online decoders from new fitted models.
+                    from rde.inference.online import OnlineDecoder
+                    new_decoders: dict = {}
+                    new_ref_posts: dict = {}
+                    for asset, fitted in fitted_models.items():
+                        feat_arr = feat_window[asset].values.astype(float)
+                        dec = OnlineDecoder(fitted)
+                        dec.batch_filter(feat_arr)  # warm up to last bar of lookback
+                        new_decoders[asset] = dec
+                        new_ref_posts[asset] = dec.filtered_posterior.copy()
+                    self.state.kl53_online_decoders = new_decoders
+                    self.state.kl53_reference_posteriors = new_ref_posts
+                    self.state.kl53_bars_since_trigger = 0
+                elif need_posteriors:
+                    target_weights, current_posteriors = result
+                    self.state.posterior_at_last_rebalance = current_posteriors
+                else:
+                    target_weights = result
 
         if target_weights is not None:
             new_fills = self.portfolio.set_target_weights(target_weights, prices, date)

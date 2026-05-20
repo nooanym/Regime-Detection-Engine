@@ -261,6 +261,24 @@ def _parse_args() -> argparse.Namespace:
                    help="Phase 53 KL threshold for out-of-cycle rebalance (0=disabled)")
     p.add_argument("--kl-min-confidence", type=float, default=0.50,
                    help="Phase 53 minimum dominant-state confidence to trigger (default 0.50)")
+    p.add_argument("--joint-hmm", action="store_true", default=False,
+                   help="Phase 54: use a single joint HMM on the stacked N-D return vector "
+                        "instead of N independent per-asset HMMs")
+    p.add_argument("--joint-hmm-cov-type", default="diag",
+                   choices=["diag", "full", "tied", "spherical"],
+                   help="Covariance type for the joint HMM (default: diag)")
+    p.add_argument("--momentum-overlay", action="store_true", default=False,
+                   help="Phase 57: add 12m-1m cross-sectional momentum overlay to λ selection")
+    p.add_argument("--momentum-lookback", type=int, default=252,
+                   help="Bars in the momentum lookback (default 252 = 12 months daily)")
+    p.add_argument("--momentum-skip", type=int, default=21,
+                   help="Bars to skip at recent end to avoid reversal (default 21 = 1 month)")
+    p.add_argument("--momentum-lambda-high", type=float, default=0.15,
+                   help="λ for positive momentum + bullish HMM (default 0.15)")
+    p.add_argument("--momentum-lambda-low", type=float, default=0.01,
+                   help="λ for negative momentum + bearish HMM (default 0.01)")
+    p.add_argument("--momentum-tilt-scale", type=float, default=0.0,
+                   help="Phase 57: additive z-score momentum tilt (0=disabled, 0.03=GO result)")
     return p.parse_args()
 
 
@@ -290,6 +308,14 @@ def main() -> None:
         drawdown_halt=args.drawdown_halt,
         poll_interval_s=args.poll_interval,
         output_dir=output_dir,
+        joint_hmm_mode=args.joint_hmm,
+        joint_hmm_covariance_type=args.joint_hmm_cov_type,
+        momentum_overlay=args.momentum_overlay,
+        momentum_lookback=args.momentum_lookback,
+        momentum_skip=args.momentum_skip,
+        momentum_lambda_high=args.momentum_lambda_high,
+        momentum_lambda_low=args.momentum_lambda_low,
+        momentum_tilt_scale=args.momentum_tilt_scale,
     )
     ma_cfg = MultiAssetConfig(
         ann_factor=252,
